@@ -1,0 +1,28 @@
+# Core Framework
+streamlit==1.31.0
+
+# LLM and AI
+google-generativeai==0.3.2
+
+# PDF Processing
+pymupdf==1.23.21
+
+# Database
+sqlalchemy==2.0.25
+
+# Vector Database
+chromadb==0.4.22
+
+# LangChain for RAG
+langchain==0.1.6
+langchain-community==0.0.20
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# Utilities
+pillow==10.2.0
+requests==2.31.0
+
+# Streamlit Components
+streamlit-mermaid==0.3.0
