@@ -7,6 +7,24 @@ import config
 from typing import Dict, Any
 from utils.helpers import retry_on_error, extract_json_from_text
 import json
+import urllib3
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+# 禁用 SSL 警告（因为我们使用自定义 SSL 配置）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+class SSLAdapter(HTTPAdapter):
+    """自定义 SSL 适配器，解决豆包 API 的 SSL 证书验证问题"""
+
+    def init_poolmanager(self, *args, **kwargs):
+        """初始化连接池管理器，使用宽松的 SSL 配置"""
+        context = create_urllib3_context()
+        # 降低 SSL 安全级别以兼容豆包 API
+        context.set_ciphers('DEFAULT@SECLEVEL=1')
+        kwargs['ssl_context'] = context
+        return super().init_poolmanager(*args, **kwargs)
 
 
 class DoubaoService:
@@ -19,6 +37,12 @@ class DoubaoService:
 
         if not self.api_url or not self.bearer_token:
             raise ValueError("豆包 API 配置未设置，请在 .env 文件中配置 DOUBAO_API_URL 和 DOUBAO_BEARER_TOKEN")
+
+        # 创建一个持久的 Session，使用自定义 SSL 配置
+        self.session = requests.Session()
+        self.session.mount('https://', SSLAdapter())
+        # 禁用 SSL 验证（因为豆包 API 的证书有问题）
+        self.session.verify = False
 
     def _call_api(self, prompt: str, temperature: float = 0.3,
                   max_tokens: int = 4096) -> str:
@@ -55,7 +79,8 @@ class DoubaoService:
         # 确保使用 UTF-8 编码
         json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
 
-        response = requests.post(self.api_url, headers=headers, data=json_data, timeout=120)
+        # 使用 Session 对象发送请求（已配置自定义 SSL）
+        response = self.session.post(self.api_url, headers=headers, data=json_data, timeout=120)
         response.raise_for_status()
 
         result = response.json()

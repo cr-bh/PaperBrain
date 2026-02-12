@@ -1,9 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import config
-from database.models import Base, Paper, Tag, PaperTag, PaperImage, ArxivPaper, KeywordConfig
+from database.models import Base, Paper, Tag, PaperTag, PaperImage, ArxivPaper, KeywordConfig, FavoritePaper
 
 
 class DatabaseManager:
@@ -414,7 +414,8 @@ class DatabaseManager:
                           abstract: str, categories: List[str], published_date: datetime,
                           score: float = None, score_reason: str = None,
                           title_zh: str = None, abstract_zh: str = None,
-                          tags: List[str] = None) -> ArxivPaper:
+                          tags: List[str] = None, venue: str = None,
+                          venue_year: int = None, institutions: List[str] = None) -> ArxivPaper:
         """创建 Arxiv 论文记录"""
         session = self.get_session()
         try:
@@ -430,6 +431,9 @@ class DatabaseManager:
                 title_zh=title_zh,
                 abstract_zh=abstract_zh,
                 tags=tags,
+                venue=venue,
+                venue_year=venue_year,
+                institutions=institutions,
                 fetch_date=datetime.now()
             )
             session.add(arxiv_paper)
@@ -578,6 +582,173 @@ class DatabaseManager:
                 session.commit()
                 return True
             return False
+        finally:
+            session.close()
+
+    # ========== FavoritePaper CRUD ==========
+
+    def favorite_arxiv_paper(self, arxiv_paper_id: int) -> Optional[FavoritePaper]:
+        """将 ArxivPaper 收藏为 FavoritePaper"""
+        session = self.get_session()
+        try:
+            arxiv_paper = session.query(ArxivPaper).filter(
+                ArxivPaper.id == arxiv_paper_id
+            ).first()
+
+            if not arxiv_paper:
+                return None
+
+            # 检查是否已收藏
+            existing = session.query(FavoritePaper).filter(
+                FavoritePaper.arxiv_id == arxiv_paper.arxiv_id
+            ).first()
+            if existing:
+                return existing
+
+            # 简化作者列表（仅保留名字）
+            authors_simple = []
+            for author in (arxiv_paper.authors or [])[:5]:
+                if isinstance(author, dict):
+                    authors_simple.append(author.get('name', str(author)))
+                else:
+                    authors_simple.append(str(author))
+
+            # 创建收藏记录
+            favorite = FavoritePaper(
+                arxiv_id=arxiv_paper.arxiv_id,
+                title=arxiv_paper.title,
+                title_zh=arxiv_paper.title_zh,
+                authors=authors_simple,
+                abstract=arxiv_paper.abstract,
+                abstract_zh=arxiv_paper.abstract_zh,
+                score=arxiv_paper.score,
+                score_reason=arxiv_paper.score_reason,
+                tags=arxiv_paper.tags,
+                arxiv_url=f"https://arxiv.org/abs/{arxiv_paper.arxiv_id}",
+                pdf_url=f"https://arxiv.org/pdf/{arxiv_paper.arxiv_id}.pdf",
+                published_date=arxiv_paper.published_date,
+                favorited_date=datetime.now()
+            )
+
+            session.add(favorite)
+
+            # 标记原记录为已收藏
+            arxiv_paper.is_favorited = True
+
+            session.commit()
+            session.refresh(favorite)
+            return favorite
+        finally:
+            session.close()
+
+    def get_all_favorites(self, limit: int = None, min_score: float = 0.0) -> List[FavoritePaper]:
+        """获取所有收藏的论文"""
+        session = self.get_session()
+        try:
+            query = session.query(FavoritePaper).filter(
+                FavoritePaper.score >= min_score
+            ).order_by(FavoritePaper.favorited_date.desc())
+            if limit:
+                query = query.limit(limit)
+            return query.all()
+        finally:
+            session.close()
+
+    def get_favorite_by_arxiv_id(self, arxiv_id: str) -> Optional[FavoritePaper]:
+        """根据 arxiv_id 获取收藏"""
+        session = self.get_session()
+        try:
+            return session.query(FavoritePaper).filter(
+                FavoritePaper.arxiv_id == arxiv_id
+            ).first()
+        finally:
+            session.close()
+
+    def remove_favorite(self, favorite_id: int) -> bool:
+        """取消收藏"""
+        session = self.get_session()
+        try:
+            favorite = session.query(FavoritePaper).filter(
+                FavoritePaper.id == favorite_id
+            ).first()
+            if favorite:
+                # 更新对应的 ArxivPaper（如果存在）
+                arxiv_paper = session.query(ArxivPaper).filter(
+                    ArxivPaper.arxiv_id == favorite.arxiv_id
+                ).first()
+                if arxiv_paper:
+                    arxiv_paper.is_favorited = False
+
+                session.delete(favorite)
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def update_favorite_notes(self, favorite_id: int, notes: str) -> bool:
+        """更新收藏的用户笔记"""
+        session = self.get_session()
+        try:
+            favorite = session.query(FavoritePaper).filter(
+                FavoritePaper.id == favorite_id
+            ).first()
+            if favorite:
+                favorite.user_notes = notes
+                session.commit()
+                return True
+            return False
+        finally:
+            session.close()
+
+    def cleanup_expired_arxiv_papers(self, days_to_keep: int = 7) -> int:
+        """
+        清理过期的临时论文数据（保留已收藏和已导入的）
+
+        Args:
+            days_to_keep: 保留天数
+
+        Returns:
+            删除的论文数量
+        """
+        session = self.get_session()
+        try:
+            expire_threshold = datetime.now() - timedelta(days=days_to_keep)
+
+            # 删除未收藏、未导入且超过保留期的论文
+            deleted = session.query(ArxivPaper).filter(
+                ArxivPaper.is_favorited == False,
+                ArxivPaper.is_imported == False,
+                ArxivPaper.fetch_date < expire_threshold
+            ).delete()
+
+            session.commit()
+            if deleted > 0:
+                print(f"✓ 已清理 {deleted} 篇过期论文")
+            return deleted
+        finally:
+            session.close()
+
+    def get_storage_stats(self) -> dict:
+        """获取存储统计信息"""
+        session = self.get_session()
+        try:
+            arxiv_count = session.query(ArxivPaper).count()
+            favorite_count = session.query(FavoritePaper).count()
+            imported_count = session.query(ArxivPaper).filter(
+                ArxivPaper.is_imported == True
+            ).count()
+            favorited_count = session.query(ArxivPaper).filter(
+                ArxivPaper.is_favorited == True
+            ).count()
+
+            return {
+                'arxiv_papers': arxiv_count,
+                'favorites': favorite_count,
+                'imported': imported_count,
+                'favorited': favorited_count,
+                'can_cleanup': arxiv_count - favorited_count - imported_count
+            }
         finally:
             session.close()
 

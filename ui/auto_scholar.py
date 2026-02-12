@@ -8,22 +8,26 @@ import plotly.express as px
 from datetime import datetime, timedelta
 from database.db_manager import db_manager
 from services.scheduler import daily_scheduler
+from services.progress_tracker import ProgressTracker, create_progress_callback, STAGE_NAMES, PipelineStage
 
 
 def show_auto_scholar():
     """显示 Auto-Scholar 页面"""
     st.title("🤖 Auto-Scholar 论文智能监控")
 
-    # 创建 Tabs
-    tab1, tab2, tab3 = st.tabs(["📊 论文列表", "⚙️ 关键词设置", "📈 统计分析"])
+    # 创建 Tabs（新增收藏列表）
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 论文列表", "⭐ 收藏列表", "⚙️ 关键词设置", "📈 统计分析"])
 
     with tab1:
         show_papers_list()
 
     with tab2:
-        show_keyword_config()
+        show_favorites_list()
 
     with tab3:
+        show_keyword_config()
+
+    with tab4:
         show_statistics()
 
 
@@ -37,7 +41,7 @@ def show_papers_list():
     with col1:
         fetch_mode = st.selectbox(
             "抓取模式",
-            ["昨天", "自定义时间段"],
+            ["昨天到目前", "自定义时间段"],
             key="fetch_mode"
         )
 
@@ -67,24 +71,7 @@ def show_papers_list():
     # 操作按钮
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     with col1:
-        if st.button("🚀 立即抓取", use_container_width=True):
-            with st.spinner("正在抓取和评分论文..."):
-                try:
-                    if fetch_mode == "自定义时间段":
-                        # 转换为 datetime
-                        start_dt = datetime.combine(start_date, datetime.min.time())
-                        end_dt = datetime.combine(end_date, datetime.max.time())
-                        daily_scheduler.run_daily_pipeline(
-                            max_results=200,
-                            start_date=start_dt,
-                            end_date=end_dt
-                        )
-                    else:
-                        daily_scheduler.run_daily_pipeline(max_results=50)
-                    st.success("✅ 抓取完成！")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ 抓取失败: {str(e)}")
+        fetch_clicked = st.button("🚀 立即抓取", use_container_width=True)
 
     with col2:
         if st.button("📄 导出报告", use_container_width=True):
@@ -95,6 +82,114 @@ def show_papers_list():
                 st.success(f"✅ 报告已生成: {report_path}")
             else:
                 st.warning("⚠️ 没有符合条件的论文")
+
+    # 处理抓取逻辑（放在按钮区域外，避免嵌套问题）
+    if fetch_clicked:
+        # 创建进度显示容器
+        progress_container = st.container()
+
+        with progress_container:
+            st.markdown("#### 🔄 抓取进度")
+
+            # 总进度条
+            overall_progress_bar = st.progress(0, text="准备开始...")
+
+            # 阶段状态显示
+            stage_status = st.empty()
+
+            # 详细日志
+            with st.expander("📋 详细日志", expanded=False):
+                log_container = st.empty()
+
+        # 进度追踪
+        logs = []
+
+        def update_ui(stage: str, current: int, total: int, message: str):
+            """更新 UI 进度"""
+            # 计算总进度
+            stage_weights = {
+                'arxiv': 0.10,
+                'keyword': 0.05,
+                'metadata': 0.10,
+                's2': 0.25,
+                'ai_scoring': 0.45,
+                'saving': 0.05,
+            }
+
+            # 计算当前阶段进度
+            stage_progress = current / total if total > 0 else 0
+
+            # 计算总进度
+            completed_weight = sum(
+                w for s, w in stage_weights.items()
+                if list(stage_weights.keys()).index(s) < list(stage_weights.keys()).index(stage)
+            )
+            current_weight = stage_weights.get(stage, 0) * stage_progress
+            overall = completed_weight + current_weight
+
+            # 更新进度条
+            overall_progress_bar.progress(min(overall, 1.0), text=f"总进度: {overall*100:.1f}%")
+
+            # 阶段名称映射
+            stage_names = {
+                'arxiv': '📡 Arxiv 抓取',
+                'keyword': '🔍 关键词筛选',
+                'metadata': '📊 元数据评分',
+                's2': '🎓 S2 筛选',
+                'ai_scoring': '🤖 AI 评分',
+                'saving': '💾 保存数据',
+            }
+
+            # 更新阶段状态
+            stage_status.markdown(f"""
+**当前阶段**: {stage_names.get(stage, stage)}
+
+**进度**: {current} / {total}
+
+**状态**: {message}
+            """)
+
+            # 添加日志
+            timestamp = datetime.now().strftime('%H:%M:%S')
+            logs.append(f"[{timestamp}] {message}")
+            log_container.code('\n'.join(logs[-30:]))  # 显示最近30条
+
+        try:
+            if fetch_mode == "自定义时间段":
+                start_dt = datetime.combine(start_date, datetime.min.time())
+                end_dt = datetime.combine(end_date, datetime.max.time())
+                result = daily_scheduler.run_daily_pipeline(
+                    max_results=500,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    progress_callback=update_ui
+                )
+            else:  # 昨天到目前模式
+                # 昨天 00:00 到今天 23:59
+                yesterday = datetime.now() - timedelta(days=1)
+                start_dt = datetime.combine(yesterday.date(), datetime.min.time())
+                end_dt = datetime.combine(datetime.now().date(), datetime.max.time())
+                result = daily_scheduler.run_daily_pipeline(
+                    max_results=500,
+                    start_date=start_dt,
+                    end_date=end_dt,
+                    progress_callback=update_ui
+                )
+
+            # 完成
+            overall_progress_bar.progress(1.0, text="✅ 抓取完成！")
+            if result:
+                st.success(f"✅ 抓取完成！共处理 {result.get('scored', 0)} 篇论文")
+            else:
+                st.success("✅ 抓取完成！")
+
+            # 延迟刷新
+            import time
+            time.sleep(1)
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"❌ 抓取失败: {str(e)}")
 
     with col3:
         if st.button("📥 批量导入", use_container_width=True):
@@ -133,11 +228,25 @@ def show_papers_list():
             format_func=lambda x: f"{x}分以上" if x > 0 else "全部"
         )
     with col2:
-        limit = st.selectbox(
+        # 扩展显示数量选项，支持自定义输入
+        limit_options = [20, 50, 100, 200, 500, 1000]
+        limit_choice = st.selectbox(
             "显示数量",
-            options=[20, 50, 100, 200],
-            index=1
+            options=limit_options + ["自定义"],
+            index=2,  # 默认100
+            format_func=lambda x: f"{x}篇" if isinstance(x, int) else x
         )
+
+        if limit_choice == "自定义":
+            limit = st.number_input(
+                "输入数量",
+                min_value=10,
+                max_value=5000,
+                value=200,
+                step=50
+            )
+        else:
+            limit = limit_choice
 
     # 获取论文列表
     papers = db_manager.get_all_arxiv_papers(limit=limit, min_score=score_filter)
@@ -195,6 +304,36 @@ def render_paper_card(paper):
                 unsafe_allow_html=True
             )
 
+        # 顶会顶刊和知名机构徽章（新增）
+        badges_html = []
+
+        # 会议/期刊徽章
+        if hasattr(paper, 'venue') and paper.venue:
+            venue_display = paper.venue
+            if hasattr(paper, 'venue_year') and paper.venue_year:
+                venue_display = f"{paper.venue} {paper.venue_year}"
+            badges_html.append(
+                f'<span style="background:#9b59b6;color:white;padding:4px 10px;border-radius:12px;'
+                f'font-size:13px;margin-right:8px;font-weight:500;">📍 {venue_display}</span>'
+            )
+
+        # 知名机构徽章
+        if hasattr(paper, 'institutions') and paper.institutions:
+            institutions_display = ', '.join(paper.institutions[:3])  # 最多显示3个
+            if len(paper.institutions) > 3:
+                institutions_display += f' +{len(paper.institutions) - 3}'
+            badges_html.append(
+                f'<span style="background:#16a085;color:white;padding:4px 10px;border-radius:12px;'
+                f'font-size:13px;margin-right:8px;font-weight:500;">🏛️ {institutions_display}</span>'
+            )
+
+        # 显示徽章
+        if badges_html:
+            st.markdown(
+                '<div style="margin-top:8px;margin-bottom:8px;">' + ''.join(badges_html) + '</div>',
+                unsafe_allow_html=True
+            )
+
         # 作者信息（带机构）
         authors_display = []
         for author in paper.authors[:3]:
@@ -237,6 +376,20 @@ def render_paper_card(paper):
                 st.session_state[f'show_abstract_{paper.id}'] = True
 
         with col2:
+            # 收藏按钮
+            is_favorited = getattr(paper, 'is_favorited', False)
+            if is_favorited:
+                st.button("⭐ 已收藏", key=f"fav_{paper.id}", disabled=True)
+            else:
+                if st.button("☆ 收藏", key=f"fav_{paper.id}"):
+                    result = db_manager.favorite_arxiv_paper(paper.id)
+                    if result:
+                        st.success("✅ 已收藏")
+                        st.rerun()
+                    else:
+                        st.error("收藏失败")
+
+        with col3:
             if not paper.is_imported:
                 if st.button("📥 导入到论文库", key=f"import_{paper.id}"):
                     st.info("导入功能开发中...")
@@ -248,6 +401,146 @@ def render_paper_card(paper):
             if st.button("收起", key=f"hide_{paper.id}"):
                 st.session_state[f'show_abstract_{paper.id}'] = False
                 st.rerun()
+
+        st.markdown("---")
+
+
+def show_favorites_list():
+    """显示收藏列表"""
+    st.markdown("### ⭐ 我的收藏")
+
+    # 获取存储统计
+    stats = db_manager.get_storage_stats()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("收藏数量", stats['favorites'])
+    col2.metric("已导入", stats['imported'])
+    col3.metric("临时论文", stats['arxiv_papers'])
+    col4.metric("可清理", stats['can_cleanup'])
+
+    # 清理按钮
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 1, 3])
+    with col1:
+        if st.button("🗑️ 清理过期数据", use_container_width=True):
+            deleted = db_manager.cleanup_expired_arxiv_papers(days_to_keep=7)
+            if deleted > 0:
+                st.success(f"✅ 已清理 {deleted} 篇过期论文")
+                st.rerun()
+            else:
+                st.info("没有需要清理的数据")
+
+    st.markdown("---")
+
+    # 获取收藏列表
+    favorites = db_manager.get_all_favorites()
+
+    if not favorites:
+        st.info("📭 还没有收藏论文，去论文列表中收藏感兴趣的论文吧！")
+        return
+
+    # 显示收藏的论文
+    for fav in favorites:
+        render_favorite_card(fav)
+
+
+def render_favorite_card(fav):
+    """渲染收藏的论文卡片"""
+    # 确定分数等级
+    score = fav.score or 0
+    if score >= 9:
+        badge_color = "#e74c3c"
+        level = "S级"
+    elif score >= 7:
+        badge_color = "#3498db"
+        level = "A级"
+    else:
+        badge_color = "#95a5a6"
+        level = "B级"
+
+    with st.container():
+        # 标题和分数
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.markdown(f"### {fav.title}")
+            if fav.title_zh:
+                st.markdown(f'<p style="color:#7f8c8d;font-size:14px;margin-top:-10px;">{fav.title_zh}</p>',
+                           unsafe_allow_html=True)
+        with col2:
+            st.markdown(
+                f'<div style="background:{badge_color};color:white;padding:8px;'
+                f'border-radius:20px;text-align:center;font-weight:bold;">'
+                f'{level} {score:.1f}分</div>',
+                unsafe_allow_html=True
+            )
+
+        # 作者信息
+        authors = fav.authors or []
+        authors_text = ', '.join(authors[:3])
+        if len(authors) > 3:
+            authors_text += '...'
+
+        # 元数据
+        pub_date = fav.published_date.strftime('%Y-%m-%d') if fav.published_date else 'N/A'
+        fav_date = fav.favorited_date.strftime('%Y-%m-%d') if fav.favorited_date else 'N/A'
+        st.caption(f"📝 {authors_text} | "
+                  f"🔗 [arxiv.org/abs/{fav.arxiv_id}]({fav.arxiv_url}) | "
+                  f"📅 发布: {pub_date} | ⭐ 收藏: {fav_date}")
+
+        # 评分理由
+        if fav.score_reason:
+            st.markdown(f"**评分理由**: {fav.score_reason}")
+
+        # 标签
+        if fav.tags:
+            tags_html = " ".join([
+                f'<span style="background:#ecf0f1;padding:4px 10px;border-radius:4px;'
+                f'font-size:12px;margin-right:5px;">{tag}</span>'
+                for tag in fav.tags
+            ])
+            st.markdown(tags_html, unsafe_allow_html=True)
+
+        # 操作按钮
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
+        with col1:
+            if st.button("📄 查看摘要", key=f"fav_abstract_{fav.id}"):
+                st.session_state[f'show_fav_abstract_{fav.id}'] = True
+
+        with col2:
+            if st.button("📥 导入论文库", key=f"fav_import_{fav.id}"):
+                st.info("导入功能开发中...")
+
+        with col3:
+            if st.button("❌ 取消收藏", key=f"unfav_{fav.id}"):
+                if db_manager.remove_favorite(fav.id):
+                    st.success("已取消收藏")
+                    st.rerun()
+
+        # 显示摘要
+        if st.session_state.get(f'show_fav_abstract_{fav.id}', False):
+            with st.expander("📖 摘要", expanded=True):
+                if fav.abstract_zh:
+                    st.markdown("**中文摘要**")
+                    st.write(fav.abstract_zh)
+                    st.markdown("**英文摘要**")
+                st.write(fav.abstract)
+
+                # PDF 链接
+                st.markdown(f"📎 [下载 PDF]({fav.pdf_url})")
+
+            if st.button("收起", key=f"hide_fav_{fav.id}"):
+                st.session_state[f'show_fav_abstract_{fav.id}'] = False
+                st.rerun()
+
+        # 用户笔记
+        with st.expander("📝 我的笔记", expanded=False):
+            notes = fav.user_notes or ""
+            new_notes = st.text_area("笔记内容", value=notes, key=f"notes_{fav.id}",
+                                     placeholder="记录你对这篇论文的想法...")
+            if st.button("💾 保存笔记", key=f"save_notes_{fav.id}"):
+                if db_manager.update_favorite_notes(fav.id, new_notes):
+                    st.success("笔记已保存")
+                else:
+                    st.error("保存失败")
 
         st.markdown("---")
 

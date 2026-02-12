@@ -98,10 +98,16 @@ class ArxivPaper(Base):
     abstract_zh = Column(Text)  # 中文摘要
     tags = Column(JSON)  # 自动生成的标签
 
+    # 会议/期刊信息（新增）
+    venue = Column(String(200))  # 会议/期刊名称，如 "ICLR"
+    venue_year = Column(Integer)  # 年份，如 2026
+    institutions = Column(JSON)  # 知名机构列表，如 ["MIT", "Google"]
+
     # 状态
     fetch_date = Column(DateTime, default=datetime.now)  # 抓取日期
     is_imported = Column(Boolean, default=False)  # 是否已导入到 Paper 表
     imported_paper_id = Column(Integer, ForeignKey('papers.id'), nullable=True)
+    is_favorited = Column(Boolean, default=False)  # 是否已收藏
 
     def __repr__(self):
         return f"<ArxivPaper(id={self.id}, arxiv_id='{self.arxiv_id}', score={self.score})>"
@@ -118,3 +124,37 @@ class KeywordConfig(Base):
 
     def __repr__(self):
         return f"<KeywordConfig(id={self.id}, keyword='{self.keyword}', category='{self.category}')>"
+
+
+class FavoritePaper(Base):
+    """收藏的论文（轻量级存储）"""
+    __tablename__ = 'favorite_papers'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    arxiv_id = Column(String(50), unique=True, nullable=False)
+
+    # 基本信息
+    title = Column(String(500), nullable=False)
+    title_zh = Column(String(500))
+    authors = Column(JSON)  # 简化存储：仅名字列表
+    abstract = Column(Text)
+    abstract_zh = Column(Text)
+
+    # 评分信息
+    score = Column(Float)
+    score_reason = Column(Text)
+    tags = Column(JSON)
+
+    # 链接
+    arxiv_url = Column(String(200))
+    pdf_url = Column(String(200))
+
+    # 元数据
+    published_date = Column(DateTime)
+    favorited_date = Column(DateTime, default=datetime.now)
+
+    # 用户笔记
+    user_notes = Column(Text)
+
+    def __repr__(self):
+        return f"<FavoritePaper(arxiv_id='{self.arxiv_id}', title='{self.title[:30]}...')>"
