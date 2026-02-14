@@ -155,42 +155,37 @@ streamlit run app.py
 <tr>
 <td width="50%" align="center">
   <b>📊 论文抓取与评分</b><br/>
-  <img src="docs/images/catch.png" width="100%"/><br/>
+  <img src="docs/images/catch.png" width="600px"/><br/>
   <sub>S/A/B 分级推荐、会议徽章、机构徽章</sub>
 </td>
 <td width="50%" align="center">
   <b>⚙️ 关键词配置</b><br/>
-  <img src="docs/images/keywords.png" width="100%"/><br/>
+  <img src="docs/images/keywords.png" width="600px"/><br/>
   <sub>核心关键词、前沿关键词配置</sub>
 </td>
 </tr>
 <tr>
 <td width="50%" align="center">
   <b>📥 自动导入论文库</b><br/>
-  <img src="docs/images/auto-import.png" width="100%"/><br/>
+  <img src="docs/images/auto-import.png" width="600px"/><br/>
   <sub>收藏论文一键导入、自动分析</sub>
 </td>
 <td width="50%" align="center">
   <b>📈 时间趋势分析</b><br/>
-  <img src="docs/images/catch-ana-time.png" width="100%"/><br/>
+  <img src="docs/images/catch-ana-time.png" width="600px"/><br/>
   <sub>按日期统计论文发表数量</sub>
 </td>
 </tr>
 <tr>
-<td colspan="2" align="center">
-  <b>📊 数据分析与可视化</b><br/>
-  <table width="100%">
-    <tr>
-      <td width="50%" align="center">
-        <img src="docs/images/catch-ana-keyword.png" width="100%"/><br/>
-        <sub>关键词分布与热度分析</sub>
-      </td>
-      <td width="50%" align="center">
-        <img src="docs/images/catch-ana-org.png" width="100%"/><br/>
-        <sub>顶会顶刊与知名机构统计</sub>
-      </td>
-    </tr>
-  </table>
+<td width="50%" align="center">
+  <b>📊 关键词分析</b><br/>
+  <img src="docs/images/catch-ana-keyword.png" width="600px"/><br/>
+  <sub>关键词分布与热度分析</sub>
+</td>
+<td width="50%" align="center">
+  <b>🏛️ 机构与顶会分析</b><br/>
+  <img src="docs/images/catch-ana-org.png" width="600px"/><br/>
+  <sub>顶会顶刊与知名机构统计</sub>
 </td>
 </tr>
 </table>
@@ -497,42 +492,37 @@ See [Auto-Scholar Guide](docs/guides/AUTO_SCHOLAR_GUIDE.md) for details.
 <tr>
 <td width="50%" align="center">
   <b>📊 Paper Crawling & Scoring</b><br/>
-  <img src="docs/images/catch.png" width="100%"/><br/>
+  <img src="docs/images/catch.png" width="600px"/><br/>
   <sub>S/A/B tier recommendations, conference badges, institution badges</sub>
 </td>
 <td width="50%" align="center">
   <b>⚙️ Keyword Configuration</b><br/>
-  <img src="docs/images/keywords.png" width="100%"/><br/>
+  <img src="docs/images/keywords.png" width="600px"/><br/>
   <sub>Core keywords and frontier keywords setup</sub>
 </td>
 </tr>
 <tr>
 <td width="50%" align="center">
   <b>📥 Auto Import to Library</b><br/>
-  <img src="docs/images/auto-import.png" width="100%"/><br/>
+  <img src="docs/images/auto-import.png" width="600px"/><br/>
   <sub>One-click import of favorited papers with auto-analysis</sub>
 </td>
 <td width="50%" align="center">
   <b>📈 Time Trend Analysis</b><br/>
-  <img src="docs/images/catch-ana-time.png" width="100%"/><br/>
+  <img src="docs/images/catch-ana-time.png" width="600px"/><br/>
   <sub>Daily publication statistics</sub>
 </td>
 </tr>
 <tr>
-<td colspan="2" align="center">
-  <b>📊 Data Analytics & Visualization</b><br/>
-  <table width="100%">
-    <tr>
-      <td width="50%" align="center">
-        <img src="docs/images/catch-ana-keyword.png" width="100%"/><br/>
-        <sub>Keyword distribution and popularity analysis</sub>
-      </td>
-      <td width="50%" align="center">
-        <img src="docs/images/catch-ana-org.png" width="100%"/><br/>
-        <sub>Top conferences and prestigious institutions statistics</sub>
-      </td>
-    </tr>
-  </table>
+<td width="50%" align="center">
+  <b>📊 Keyword Analysis</b><br/>
+  <img src="docs/images/catch-ana-keyword.png" width="600px"/><br/>
+  <sub>Keyword distribution and popularity analysis</sub>
+</td>
+<td width="50%" align="center">
+  <b>🏛️ Institution & Conference Analysis</b><br/>
+  <img src="docs/images/catch-ana-org.png" width="600px"/><br/>
+  <sub>Top conferences and prestigious institutions statistics</sub>
 </td>
 </tr>
 </table>
