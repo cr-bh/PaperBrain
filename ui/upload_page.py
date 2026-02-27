@@ -4,7 +4,6 @@
 """
 import streamlit as st
 from pathlib import Path
-import shutil
 import config
 from database.db_manager import db_manager
 from services.pdf_parser import pdf_parser
@@ -39,8 +38,31 @@ def save_uploaded_file(uploaded_file) -> str:
     return str(file_path)
 
 
+def _initialize_upload_state():
+    """初始化上传页面相关的 session state。"""
+    defaults = {
+        'upload_complete': False,
+        'last_uploaded_paper_id': None,
+        'upload_processing': False,
+        'upload_show_balloons': False,
+        'upload_uploader_key': 0,
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def _reset_upload_widget_state():
+    """重置上传组件状态，避免 file_uploader 持有旧文件。"""
+    st.session_state.upload_processing = False
+    st.session_state.upload_uploader_key += 1
+
+
 def show_upload_page():
     """显示上传页面"""
+    _initialize_upload_state()
+
     st.title("📤 上传论文")
 
     st.markdown("""
@@ -55,38 +77,58 @@ def show_upload_page():
 
     st.markdown("---")
 
-    # 检查是否有上传完成的论文
-    if st.session_state.get('upload_complete', False):
+    # 上传完成态：仅展示结果区域，避免底部重复渲染上传控件
+    if st.session_state.upload_complete:
         st.success("🎉 论文处理成功！")
-        st.balloons()
 
-        # 显示查看详情按钮
+        if st.session_state.upload_show_balloons:
+            st.balloons()
+            st.session_state.upload_show_balloons = False
+
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if st.button("📖 查看论文详情", type="primary", use_container_width=True):
-                paper_id = st.session_state.get('last_uploaded_paper_id')
+                paper_id = st.session_state.last_uploaded_paper_id
                 st.session_state.selected_paper_id = paper_id
                 st.session_state.current_page = 'paper_detail'
-                st.session_state.upload_complete = False  # 清除标志
+                st.session_state.upload_complete = False
+                _reset_upload_widget_state()
+                st.rerun()
+
+            if st.button("📤 继续上传其他论文", use_container_width=True):
+                st.session_state.upload_complete = False
+                st.session_state.last_uploaded_paper_id = None
+                _reset_upload_widget_state()
                 st.rerun()
 
         st.markdown("---")
-        st.info("💡 您可以继续上传其他论文")
+        st.info("💡 当前论文已处理完成，可查看详情或继续上传")
+        return
+
+    uploader_key = f"paper_uploader_{st.session_state.upload_uploader_key}"
 
     # 文件上传
     uploaded_file = st.file_uploader(
         "选择 PDF 文件",
         type=['pdf'],
-        help="支持 PDF 格式的学术论文"
+        help="支持 PDF 格式的学术论文",
+        key=uploader_key,
     )
 
     if uploaded_file is not None:
-        # 显示文件信息
         st.success(f"✅ 已选择文件: {uploaded_file.name}")
 
-        # 处理按钮
-        if st.button("🚀 开始处理", type="primary", use_container_width=True):
+        # 处理中态由 session state 驱动，避免状态文案闪回“开始处理”
+        if st.session_state.upload_processing:
             process_paper(uploaded_file)
+            return
+
+        if st.button("🚀 开始处理", type="primary", use_container_width=True):
+            st.session_state.upload_processing = True
+            st.rerun()
+    elif st.session_state.upload_processing:
+        st.warning("⚠️ 上传文件状态已失效，请重新选择 PDF 文件。")
+        _reset_upload_widget_state()
 
 
 def process_paper(uploaded_file):
@@ -190,11 +232,15 @@ def process_paper(uploaded_file):
         # 设置上传完成标志
         st.session_state.upload_complete = True
         st.session_state.last_uploaded_paper_id = paper.id
+        st.session_state.upload_show_balloons = True
+        st.session_state.upload_processing = False
 
         # 触发页面重新渲染以显示按钮
         st.rerun()
 
     except Exception as e:
+        st.session_state.upload_processing = False
+        st.session_state.upload_show_balloons = False
         st.error(f"❌ 处理失败: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
