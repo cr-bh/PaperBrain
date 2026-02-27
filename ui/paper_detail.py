@@ -2,9 +2,12 @@
 论文详情页面
 显示论文的完整信息、思维导图和结构化笔记
 """
+import copy
+import json
+from pathlib import Path
+
 import streamlit as st
 from database.db_manager import db_manager
-from pathlib import Path
 
 
 def show_paper_detail():
@@ -91,17 +94,25 @@ def show_structured_notes(paper):
         return
 
     summary = paper.content_summary['summary_struct']
+    summary_signature = json.dumps(summary, ensure_ascii=False, sort_keys=True)
+    edited_summary_key = f"edited_summary_{paper.id}"
+    edited_summary_signature_key = f"edited_summary_signature_{paper.id}"
 
     # 编辑模式切换
     col1, col2 = st.columns([6, 1])
     with col2:
         edit_mode = st.toggle("✏️ 编辑", key=f"edit_mode_{paper.id}")
 
-    # 初始化编辑状态
-    if f'edited_summary_{paper.id}' not in st.session_state:
-        st.session_state[f'edited_summary_{paper.id}'] = summary.copy()
+    # 初始化编辑状态，或当数据库内容变化时刷新编辑缓存
+    if (
+        edited_summary_key not in st.session_state
+        or st.session_state.get(edited_summary_signature_key) != summary_signature
+    ):
+        st.session_state[edited_summary_key] = copy.deepcopy(summary)
+        st.session_state[edited_summary_signature_key] = summary_signature
 
-    edited_summary = st.session_state[f'edited_summary_{paper.id}']
+    edited_summary = st.session_state[edited_summary_key]
+    display_summary = edited_summary if edit_mode else summary
 
     # 定义各个部分的配置
     sections = [
@@ -119,14 +130,15 @@ def show_structured_notes(paper):
 
     # 显示各个部分
     for section_key, section_title, image_type in sections:
-        if edited_summary.get(section_key):
+        section_content = display_summary.get(section_key)
+        if section_content:
             st.markdown(f"### {section_title}")
 
             if edit_mode:
                 # 编辑模式：显示文本区域
                 new_content = st.text_area(
                     f"编辑 {section_title}",
-                    value=edited_summary[section_key],
+                    value=edited_summary.get(section_key, ""),
                     height=200,
                     key=f"edit_{section_key}_{paper.id}",
                     label_visibility="collapsed"
@@ -134,7 +146,7 @@ def show_structured_notes(paper):
                 edited_summary[section_key] = new_content
             else:
                 # 查看模式：显示 Markdown
-                st.markdown(edited_summary[section_key])
+                st.markdown(section_content)
 
             # 显示相关图片
             if image_type:
@@ -248,14 +260,21 @@ def show_structured_notes(paper):
         with col1:
             if st.button("💾 保存修改", type="primary", key=f"save_{paper.id}", use_container_width=True):
                 # 更新数据库
-                paper.content_summary['summary_struct'] = edited_summary
+                updated_summary = copy.deepcopy(edited_summary)
+                paper.content_summary['summary_struct'] = updated_summary
                 db_manager.update_paper_summary(paper.id, paper.content_summary)
+                st.session_state[edited_summary_signature_key] = json.dumps(
+                    updated_summary,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
                 st.toast("✓ 修改已保存", icon="✅")
                 st.rerun()
         with col2:
             if st.button("↩️ 重置", key=f"reset_{paper.id}", use_container_width=True):
                 # 重置为原始内容
-                st.session_state[f'edited_summary_{paper.id}'] = summary.copy()
+                st.session_state[edited_summary_key] = copy.deepcopy(summary)
+                st.session_state[edited_summary_signature_key] = summary_signature
                 st.rerun()
 
 
