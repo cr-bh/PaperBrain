@@ -39,6 +39,7 @@ ENV/
 data/papers/*
 data/images/*
 data/*.db
+data/*.json
 data/chroma_db/*
 
 # Keep directory structure
