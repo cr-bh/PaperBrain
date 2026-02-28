@@ -60,6 +60,10 @@ with st.sidebar:
         st.session_state.current_page = 'auto_scholar'
         st.rerun()
 
+    if st.button("⚙️ 设置", use_container_width=True):
+        st.session_state.current_page = 'settings'
+        st.rerun()
+
     st.markdown("---")
 
     # 统计信息
@@ -88,3 +92,6 @@ elif st.session_state.current_page == 'tag_management':
 elif st.session_state.current_page == 'auto_scholar':
     from ui.auto_scholar import show_auto_scholar
     show_auto_scholar()
+elif st.session_state.current_page == 'settings':
+    from ui.settings import show_settings
+    show_settings()
