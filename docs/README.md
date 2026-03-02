@@ -94,6 +94,7 @@
 - [2026-02-13](development/iteration_logs/2026-02-13.md) - v1.4.0 开发迭代
 
 ### Bug 修复日志 (bugfix_logs/)
+- [2026-02-28](development/bugfix_logs/2026-02-28.md) - v1.5.1 导入导航 + 总结截断
 - [2026-02-12](development/bugfix_logs/2026-02-12.md) - v1.1.1 Bug 修复
 
 ### 开发指南

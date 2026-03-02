@@ -518,8 +518,8 @@ def render_favorite_card(fav):
                 st.session_state[f'show_fav_abstract_{fav.id}'] = True
 
         with col2:
+            imported_paper_key = f"imported_paper_{fav.id}"
             if st.button("📥 导入论文库", key=f"fav_import_{fav.id}"):
-                # 查找对应的 ArxivPaper
                 arxiv_paper = db_manager.get_arxiv_paper_by_arxiv_id(fav.arxiv_id)
 
                 if not arxiv_paper:
@@ -527,36 +527,34 @@ def render_favorite_card(fav):
                 elif arxiv_paper.is_imported:
                     st.info("该论文已导入到论文库")
                 else:
-                    # 创建进度显示
                     progress_bar = st.progress(0)
                     status_text = st.empty()
 
-                    # 定义进度回调函数
                     def update_progress(progress: int, message: str):
                         progress_bar.progress(progress / 100)
                         status_text.text(message)
 
-                    # 执行导入
                     result = paper_importer.import_arxiv_paper(
                         arxiv_paper_id=arxiv_paper.id,
                         progress_callback=update_progress
                     )
 
-                    # 显示结果
                     if result['success']:
                         if result.get('is_duplicate'):
                             st.info(result['message'])
                         else:
                             st.success(f"✅ {result['message']}")
                             st.balloons()
-
-                        # 提供查看详情按钮
-                        if st.button("📖 查看论文详情", key=f"view_imported_{fav.id}"):
-                            st.session_state.current_page = 'paper_detail'
-                            st.session_state.selected_paper_id = result['paper'].id
-                            st.rerun()
+                        st.session_state[imported_paper_key] = result['paper'].id
                     else:
                         st.error(f"❌ {result.get('error', '导入失败')}")
+
+            if imported_paper_key in st.session_state:
+                if st.button("📖 查看论文详情", key=f"view_imported_{fav.id}"):
+                    paper_id = st.session_state.pop(imported_paper_key)
+                    st.session_state.current_page = 'paper_detail'
+                    st.session_state.selected_paper_id = paper_id
+                    st.rerun()
 
         with col3:
             if st.button("❌ 取消收藏", key=f"unfav_{fav.id}"):

@@ -30,8 +30,8 @@ class Summarizer:
         # 格式化 Prompt
         prompt = format_prompt(SUMMARIZE_PAPER_PROMPT, paper_text=paper_text)
 
-        # 调用 LLM 生成总结
-        summary = self.llm.generate_json(prompt, temperature=0.3)
+        # 结构化总结包含 9 个详细 section，需要足够的输出 token
+        summary = self.llm.generate_json(prompt, temperature=0.3, max_tokens=16384)
 
         return summary
 

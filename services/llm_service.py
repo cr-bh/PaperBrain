@@ -190,9 +190,10 @@ class LLMService:
         return self._call_api(prompt, temperature, max_tokens)
 
     @retry_on_error(max_retries=3, delay=2.0)
-    def generate_json(self, prompt: str, temperature: float = 0.3) -> Dict[str, Any]:
+    def generate_json(self, prompt: str, temperature: float = 0.3,
+                      max_tokens: int = None) -> Dict[str, Any]:
         from utils.helpers import extract_json_from_text
-        text = self._call_api(prompt, temperature)
+        text = self._call_api(prompt, temperature, max_tokens)
         return extract_json_from_text(text)
 
     def count_tokens(self, text: str) -> int:
