@@ -360,8 +360,10 @@ class PDFParser:
                     return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, bot_y + 5)
 
         # ── 策略2：面积矩形（适合 Figure 图形框） ──
-        best = None
-        best_score = 0
+        # 取所有候选矩形的 union（包围盒），而非单个"最优"矩形。
+        # 原因：图形可能由多个 drawing 组成，单个 drawing 只覆盖局部（如橙色边框只覆盖下2/3），
+        # 取 union 才能得到完整图形的上下边界。
+        candidates = []
         for d in drawings:
             r = d.get('rect')
             if r is None:
@@ -374,18 +376,24 @@ class PDFParser:
             if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
                 continue
             if search_above:
-                if r.y1 < cap_rect.y0 - 200 or r.y0 >= cap_rect.y0:
+                # 上界用 search_top（前一个 Caption 底部），而非固定 200pt
+                # 固定 200pt 会把高度 > 200pt 的大图顶部 drawing 错误排除
+                if r.y0 < search_top or r.y0 >= cap_rect.y0:
                     continue
-                score = rw * rh / (abs(r.y1 - cap_rect.y0) + 1)
             else:
                 if r.y0 > cap_rect.y1 + 200 or r.y1 <= cap_rect.y1:
                     continue
-                score = rw * rh / (abs(r.y0 - cap_rect.y1) + 1)
-            if score > best_score:
-                best_score = score
-                best = r
+            candidates.append(r)
 
-        return best
+        if not candidates:
+            return None
+
+        # 取所有候选的包围盒（union）
+        union_x0 = min(r.x0 for r in candidates)
+        union_y0 = min(r.y0 for r in candidates)
+        union_x1 = max(r.x1 for r in candidates)
+        union_y1 = max(r.y1 for r in candidates)
+        return fitz.Rect(union_x0, union_y0, union_x1, union_y1)
 
     def _determine_crop_rect(self, hit: Dict, caption_hits: List[Dict],
                               page_rect: "fitz.Rect",
