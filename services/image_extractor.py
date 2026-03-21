@@ -63,16 +63,20 @@ class ImageExtractor:
         return False
 
     def _classify_image_type(self, caption: str) -> str:
-        """分类图片类型"""
-        caption_lower = caption.lower()
-        if 'architecture' in caption_lower or 'framework' in caption_lower:
-            return 'architecture'
-        elif 'performance' in caption_lower or 'result' in caption_lower:
-            return 'performance'
-        elif 'algorithm' in caption_lower:
+        """分类图片类型，基于 Caption 文本精准分类。与 pdf_parser._classify_caption 保持一致。"""
+        c = caption.lower()
+        if re.match(r'(algorithm|alg\.?)\s*\d+', c):
             return 'algorithm'
+        elif re.match(r'(table|tab\.?)\s*\d+', c):
+            return 'table'
+        elif re.match(r'(listing|scheme)\s*\d+', c):
+            return 'algorithm'
+        elif re.search(r'convergence|result|performance|comparison|accuracy|loss|curve|ablation|f1|precision|recall', c):
+            return 'performance'
+        elif re.search(r'architecture|framework|overview|pipeline|structure|model|illustration|system', c):
+            return 'architecture'
         else:
-            return 'other'
+            return 'figure'
 
 
 # 创建全局图片提取器实例
