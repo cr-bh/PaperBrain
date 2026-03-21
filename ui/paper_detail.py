@@ -120,8 +120,8 @@ def show_structured_notes(paper):
         ('existing_solutions', '📚 相关工作', None),
         ('limitations', '⚠️ 现有方案的不足', None),
         ('contribution', '💡 本文贡献', None),
-        ('methodology', '🔬 具体方法', 'architecture,algorithm'),
-        ('results', '📊 实验结果', 'performance'),
+        ('methodology', '🔬 具体方法', 'architecture,algorithm,figure'),
+        ('results', '📊 实验结果', 'performance,table'),
         ('future_work_paper', '🔮 未来工作（论文提出）', None),
         ('future_work_insights', '💭 未来工作（个人见解）', None),
         # 向后兼容：如果是旧版本的 future_work 字段
@@ -223,6 +223,10 @@ def show_structured_notes(paper):
                             st.markdown("**算法流程图:**")
                         elif img_type == 'performance':
                             st.markdown("**性能对比图:**")
+                        elif img_type == 'table':
+                            st.markdown("**数据表格:**")
+                        elif img_type == 'figure':
+                            st.markdown("**论文图片:**")
 
                         for idx, img in enumerate(filtered_images):
                             if Path(img.image_path).exists():
