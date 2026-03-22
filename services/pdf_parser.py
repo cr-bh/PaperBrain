@@ -381,6 +381,29 @@ class PDFParser:
                     bot_y = max([y for y in hlines if y > top_y], default=top_y + 50)
                     return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, bot_y + 5)
 
+        # ── 策略1b：Table 底部水平线定位 ──
+        # Table 的框线是水平线（rh≈0），Strategy 1 仅对 Algorithm 启用，
+        # 但 Table 同样需要水平线来确定底部边界。
+        # 找 caption 下方所有宽度 ≥ 30% 栏宽的水平线，取 y 最大的作为表格底部。
+        if not search_above:
+            table_hlines = []
+            for d in drawings:
+                r = d.get('rect')
+                if r is None:
+                    continue
+                rw = r.x1 - r.x0
+                rh = r.y1 - r.y0
+                if rh >= 3 or rw < col_width * 0.3:
+                    continue
+                r_cx = (r.x0 + r.x1) / 2
+                if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
+                    continue
+                if r.y0 > cap_rect.y1:  # caption 下方
+                    table_hlines.append(r.y0)
+            if table_hlines:
+                table_bottom = max(table_hlines)
+                return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, table_bottom + 5)
+
         # ── 策略2：面积矩形（适合 Figure 图形框） ──
         # 取所有候选矩形的 union（包围盒），而非单个"最优"矩形。
         # 原因：图形可能由多个 drawing 组成，单个 drawing 只覆盖局部（如橙色边框只覆盖下2/3），
@@ -392,8 +415,10 @@ class PDFParser:
                 continue
             rw = r.x1 - r.x0
             rh = r.y1 - r.y0
-            # rw 阈值从 0.3 降到 0.1：放宽以捕获由细长 drawing 组成的图（如神经网络示意图）
-            if rw < col_width * 0.1 or rh < 20:
+            # rw 阈值：min(col_width*0.1, 20pt) 取较小值，确保最大不超过 20pt
+            # - 单栏（col_width≈280）：0.1*280=28pt → 取 20pt，适度过滤噪声
+            # - 跨栏（col_width≈572）：0.1*572=57pt 过严 → 取 20pt，保留顶部细小 drawing
+            if rw < min(col_width * 0.1, 20) or rh < 20:
                 continue
             r_cx = (r.x0 + r.x1) / 2
             if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
@@ -515,7 +540,9 @@ class PDFParser:
         if re.search(r'convergence|result|performance|comparison|accuracy|loss|curve|ablation|f1|precision|recall', c):
             return 'performance'
         # 3. 架构/框架图
-        if re.search(r'architecture|framework|overview|pipeline|structure|model|illustration|system', c):
+        # 移除 'model'：该词在 performance/distribution 图 caption 中极常见，
+        # 不足以判断是系统架构图，保留更具体的结构性词汇
+        if re.search(r'architecture|framework|overview|pipeline|structure|illustration|system', c):
             return 'architecture'
         return 'figure'
 
@@ -624,13 +651,15 @@ class PDFParser:
                         col_x0, col_x1 = cx0, cx1
                         break
 
-                # 跨栏检测：Caption 宽度超过页面内容宽度的 50%，说明是跨栏图
-                # 此时应使用全页宽裁剪，而非限制在某一栏内
-                page_content_width = page.rect.x1 - page.rect.x0 - 40
-                cap_width = cap_rect.x1 - cap_rect.x0
-                if len(columns) > 1 and cap_width > page_content_width * 0.5:
-                    col_x0 = page.rect.x0 + 20
-                    col_x1 = page.rect.x1 - 20
+                # 跨栏检测：几何法——caption 同时跨越左栏右边界和右栏左边界
+                # 比宽度阈值法更稳健，避免 caption 宽度恰好在阈值附近时误判
+                # margin=5pt 防止浮点精度导致边界列的 caption 被误判为跨栏
+                if len(columns) > 1:
+                    left_col_x1 = columns[0][1]
+                    right_col_x0 = columns[1][0]
+                    if cap_rect.x0 < left_col_x1 - 5 and cap_rect.x1 > right_col_x0 + 5:
+                        col_x0 = page.rect.x0 + 20
+                        col_x1 = page.rect.x1 - 20
 
                 crop_rect = self._determine_crop_rect(
                     hit, caption_hits, page.rect, col_x0, col_x1, page

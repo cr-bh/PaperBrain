@@ -73,7 +73,7 @@ class ImageExtractor:
             return 'algorithm'
         elif re.search(r'convergence|result|performance|comparison|accuracy|loss|curve|ablation|f1|precision|recall', c):
             return 'performance'
-        elif re.search(r'architecture|framework|overview|pipeline|structure|model|illustration|system', c):
+        elif re.search(r'architecture|framework|overview|pipeline|structure|illustration|system', c):
             return 'architecture'
         else:
             return 'figure'
