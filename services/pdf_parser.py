@@ -694,6 +694,20 @@ class PDFParser:
                     hit, caption_hits, page.rect, col_x0, col_x1, page
                 )
 
+                # 跨栏补充检测：caption 判断为单栏，但 drawings/文本 x 范围超出当前栏
+                # 典型场景：caption 右边界恰好在栏间隙内（差几 pt），导致跨栏检测失败，
+                # 但图表内容实际跨越了两栏（如 Figure 4 drawings x=228~413 超出左栏 x1=359）
+                if len(columns) > 1 and not (
+                    col_x0 == page.rect.x0 + 20 and col_x1 == page.rect.x1 - 20
+                ):
+                    # crop_rect 的 x 范围是否超出了当前栏（允许 20pt 误差）
+                    if crop_rect.x0 < col_x0 - 20 or crop_rect.x1 > col_x1 + 20:
+                        col_x0 = page.rect.x0 + 20
+                        col_x1 = page.rect.x1 - 20
+                        crop_rect = self._determine_crop_rect(
+                            hit, caption_hits, page.rect, col_x0, col_x1, page
+                        )
+
                 # 合法性检查
                 if (crop_rect.is_empty
                         or crop_rect.width < 50
