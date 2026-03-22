@@ -204,6 +204,12 @@ class PDFParser:
         # 例如：'Algorithm 3. We now proceed...' → 正文；'Algorithm 3 Iterative LQR' → Caption
         if re.match(r'^(Algorithm|Alg\.?)\s*\d+\.\s+[A-Z]', line):
             return False
+        # 排除 "Algorithm N 小写动词..." 格式的正文引用句
+        # 真正的 Caption 在编号后跟冒号或大写名词短语，正文引用句跟小写动词
+        # 例如：'Algorithm 1 instantiates...' → 正文；'Algorithm 1 Backward Pass' → Caption
+        m = re.match(r'^(Algorithm|Alg\.?)\s*\d+\s+([a-z]\w*)', line)
+        if m:
+            return False
         return True
 
     def _collect_caption_rects(self, page: fitz.Page) -> List[Dict]:
@@ -254,10 +260,14 @@ class PDFParser:
                 continue
 
             is_table = bool(TABLE_PATTERN.match(line))
+            is_algorithm = bool(re.match(
+                r'^(Algorithm|Alg\.?|Listing|Scheme)\s*\d+', line, re.IGNORECASE
+            ))
             caption_hits.append({
                 "text": line,
                 "rect": rects[0],
                 "is_table": is_table,
+                "is_algorithm": is_algorithm,
             })
 
         # 按 y 坐标排序，从上到下
@@ -308,13 +318,16 @@ class PDFParser:
                                          cap_rect: "fitz.Rect",
                                          col_x0: float, col_x1: float,
                                          search_above: bool = True,
-                                         search_top: float = 0.0) -> "fitz.Rect | None":
+                                         search_top: float = 0.0,
+                                         is_algorithm: bool = False) -> "fitz.Rect | None":
         """
         用 get_drawings() 找 Caption 附近的图形/算法框边界。
         两种策略：
-        1. 水平线对（Algorithm 框）：找 Caption 上方最近的横线（上边）+ 下方最近的横线（下边）
-        2. 面积矩形（Figure 图形框）：找 Caption 附近面积最大的矩形
-        优先尝试水平线对策略，失败则尝试面积矩形策略。
+        1. 水平线对（Algorithm 框）：仅在 is_algorithm=True 时启用。
+           找 Caption 上方最近的横线（上边）+ 下方最近的横线（下边）。
+           不对 Figure/Table 启用，避免将页眉装饰线误判为图片边框。
+        2. 面积矩形（Figure/Algorithm 图形框）：找 Caption 附近所有符合条件的
+           矩形的 union，rw 阈值 10% 栏宽（原 30%，放宽以捕获细长 drawing 组成的图）。
         """
         try:
             drawings = page.get_drawings()
@@ -323,21 +336,25 @@ class PDFParser:
 
         col_width = col_x1 - col_x0
 
-        # ── 策略1：水平线对（适合 Algorithm 框） ──
-        hlines = []
-        for d in drawings:
-            r = d.get('rect')
-            if r is None:
-                continue
-            rw = r.x1 - r.x0
-            rh = r.y1 - r.y0
-            # 水平线：高度 < 2pt，宽度 > 30% 栏宽
-            if rh >= 2 or rw < col_width * 0.3:
-                continue
-            r_cx = (r.x0 + r.x1) / 2
-            if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
-                continue
-            hlines.append(r.y0)
+        # ── 策略1：水平线对（仅 Algorithm 框使用） ──
+        # Figure 不使用此策略，避免页眉水平线被误判为图片边框
+        if not is_algorithm:
+            hlines = []
+        else:
+            hlines = []
+            for d in drawings:
+                r = d.get('rect')
+                if r is None:
+                    continue
+                rw = r.x1 - r.x0
+                rh = r.y1 - r.y0
+                # 水平线：高度 < 2pt，宽度 > 30% 栏宽
+                if rh >= 2 or rw < col_width * 0.3:
+                    continue
+                r_cx = (r.x0 + r.x1) / 2
+                if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
+                    continue
+                hlines.append(r.y0)
 
         if hlines:
             if search_above:
@@ -375,7 +392,8 @@ class PDFParser:
                 continue
             rw = r.x1 - r.x0
             rh = r.y1 - r.y0
-            if rw < col_width * 0.3 or rh < 20:
+            # rw 阈值从 0.3 降到 0.1：放宽以捕获由细长 drawing 组成的图（如神经网络示意图）
+            if rw < col_width * 0.1 or rh < 20:
                 continue
             r_cx = (r.x0 + r.x1) / 2
             if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
@@ -411,12 +429,15 @@ class PDFParser:
         """
         cap_rect = hit["rect"]
 
+        is_algorithm = hit.get("is_algorithm", False)
+
         if hit["is_table"]:
             # Table：Caption 在上方，内容在下方
             bbox = None
             if page is not None:
                 bbox = self._find_content_bbox_via_drawings(
-                    page, cap_rect, col_x0, col_x1, search_above=False
+                    page, cap_rect, col_x0, col_x1,
+                    search_above=False, is_algorithm=False
                 )
             if bbox is not None:
                 return fitz.Rect(
@@ -448,7 +469,8 @@ class PDFParser:
             if page is not None:
                 bbox = self._find_content_bbox_via_drawings(
                     page, cap_rect, col_x0, col_x1,
-                    search_above=True, search_top=coarse_top
+                    search_above=True, search_top=coarse_top,
+                    is_algorithm=is_algorithm
                 )
             if bbox is not None:
                 # bbox.y1 可能超过 Caption（Algorithm 框内容在 Caption 下方）
