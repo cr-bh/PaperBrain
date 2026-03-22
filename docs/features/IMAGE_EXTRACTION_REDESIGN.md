@@ -1,9 +1,9 @@
 # 论文图片提取重设计方案
 
-> **版本**: 1.2
+> **版本**: 1.3
 > **创建日期**: 2026-03-21
-> **最后更新**: 2026-03-21
-> **状态**: 已完成
+> **最后更新**: 2026-03-22
+> **状态**: 主体已完成，Algorithm 专用裁剪路径待实现（TODO）
 > **优先级**: P1
 
 ---
@@ -461,7 +461,9 @@ page.get_text("blocks") 返回空（极少数加密 PDF）
 2. ✅ **`services/image_extractor.py`**：更新分类逻辑
 3. ✅ **`ui/paper_detail.py`**：同步更新 `sections` 配置，支持 `table` 和 `figure` 类型展示
 4. ✅ **修复 Fig. 1 跨栏大图上边界截取问题**（见十二节）
-5. 🔲 使用至少 3 篇不同类型论文（纯光栅图、纯矢量图、混合）验证提取结果
+5. ✅ **修复 Algorithm 正文引用句误判 + 伪代码扩展越界**（见十三节）
+6. 🔲 **TODO：Algorithm 专用裁剪路径**（见十四节）
+7. 🔲 使用至少 3 篇不同类型论文（纯光栅图、纯矢量图、混合）验证提取结果
 
 ---
 
@@ -475,7 +477,10 @@ page.get_text("blocks") 返回空（极少数加密 PDF）
 - [x] 用户手动上传图片功能正常
 - [x] Auto-Scholar 导入论文后图片正常提取
 - [x] RAG 对话、标签、思维导图等功能不受影响
-- [x] **Fig. 1 跨栏大图完整提取（上边界不截取）**
+- [x] Fig. 1 跨栏大图完整提取（上边界不截取）
+- [x] Algorithm 正文引用句不再被误判为 Caption
+- [x] Algorithm 伪代码截取不越界到 APPENDIX/REFERENCES
+- [ ] **TODO：Algorithm 裁剪策略与实际结构对齐**（见十四节）
 
 ---
 
@@ -507,3 +512,100 @@ Strategy 2 存在两个缺陷：
 - 将"取最高分单个矩形"改为"取所有候选的 union（包围盒）"：确保完整覆盖所有图形元素
 
 修复后 Fig. 1 的 `bbox.y0` 从 178.2 → 59.6，`crop = Rect(20, 56.6, 592, 374)`，完整包含图形顶部三行内容。
+
+---
+
+## 十三、已修复：Algorithm 正文引用句误判 + 伪代码扩展越界
+
+**测试 PDF**：`AL_iLQR_Tutorial.pdf`
+
+### 问题 1：Algorithm 正文引用句被误判为 Caption
+
+**现象**：page 4 正文句 `Algorithm 3. We now proceed with the formal derivation.` 被识别为 Caption，生成一张截取 page 4 左栏正文内容（III. AL-DDP → A. Backward Pass）的图片。
+
+**根因**：`_is_caption_line` 的动词过滤列表不含 `proceed`，该句通过所有过滤规则。正文引用句有明确句法特征：`Algorithm N.` + 空格 + 大写字母开头的完整句子（数字后紧跟句点）。
+
+**修复**（`_is_caption_line`）：新增规则，匹配 `^(Algorithm|Alg\.?)\s*\d+\.\s+[A-Z]` 的行直接返回 `False`。
+
+### 问题 2：Algorithm 6 伪代码扩展越界，包含 APPENDIX/REFERENCES
+
+**现象**：Algorithm 6 截图（574×375px 应有内容）被扩展为 574×785px，包含 APPENDIX、REFERENCES 及 3 篇引用文献。
+
+**根因**：`_extend_crop_for_algorithm` 在 crop 底部（y=513）到 `next_cap_y`（y=772，页面底部）之间扫描文本块时：
+- `APPENDIX`（avg_len=8）、`REFERENCES`（avg_len=10）、参考文献条目（avg_len=35.9）均低于停止阈值 `avg_len > 40`，全部被纳入扩展
+
+**修复**（`_extend_crop_for_algorithm`）：新增两条早停条件：
+```python
+# 全大写节标题（APPENDIX、REFERENCES、ACKNOWLEDGMENT 等）
+if re.match(r'^[A-Z][A-Z\s\-]{3,}$', text.strip()):
+    break
+# 参考文献条目（以 [数字] 开头）
+if re.match(r'^\[\d+\]', text.strip()):
+    break
+```
+
+**验证结果**：Algorithm 6 图片高度 785px → 375px，不含 APPENDIX/REFERENCES；误判图片消失，总提取数 7 → 6。
+
+---
+
+## 十四、TODO：Algorithm 专用裁剪路径
+
+### 背景
+
+用户给出的 3 条规律：
+- **Figure**：标题在图片**下方**
+- **Table**：标题在表格**上方**
+- **Algorithm**：标题是伪代码框的**第一行**，内容在标题下方
+
+当前实现将 Algorithm 与 Figure 同路径处理（向上找内容），实际上 Algorithm 的 Caption 就是框的第一行，内容在 Caption 下方。当前能工作是因为 Strategy 1（水平线对）碰巧找到了框顶线和框底线，但 `_extend_crop_for_algorithm` 的文本扩展逻辑是补丁，存在隐患。
+
+### 目标
+
+Algorithm 专用路径，完全对齐实际结构，废弃对 Algorithm 的 `_extend_crop_for_algorithm` 调用。
+
+### 实现方案
+
+**Step 1**：`_collect_caption_rects` 新增 `is_algorithm` 字段
+
+```python
+is_algorithm = bool(re.match(r'(Algorithm|Alg\.?|Listing|Scheme)\s*\d+', line, re.IGNORECASE))
+caption_hits.append({
+    "text": line,
+    "rect": rects[0],
+    "is_table": is_table,
+    "is_algorithm": is_algorithm,  # 新增，向后兼容（下游用 hit.get("is_algorithm", False)）
+})
+```
+
+**Step 2**：`_determine_crop_rect` 新增 Algorithm 分支
+
+```python
+elif hit.get("is_algorithm"):
+    # Algorithm：Caption 是框第一行，crop 从框顶线到框底线
+    # coarse_top = 前一个同栏 Caption 底部（或页面顶部）
+    same_col_hits = [h for h in caption_hits if h is not hit and ...]
+    prev_ys = [h["rect"].y1 for h in same_col_hits if h["rect"].y1 < cap_rect.y0 - 10]
+    coarse_top = (max(prev_ys) + 5) if prev_ys else (page_rect.y0 + 20)
+    next_ys = [h["rect"].y0 for h in same_col_hits if h["rect"].y0 > cap_rect.y1 + 10]
+    bottom_fallback = (min(next_ys) - 5) if next_ys else (page_rect.y1 - 20)
+
+    # Strategy 1：水平线对精确定位框顶（Caption 上方）和框底
+    # 提取为独立方法 _find_algorithm_bbox_via_hlines(page, cap_rect, col_x0, col_x1, coarse_top, bottom_fallback)
+    bbox = self._find_algorithm_bbox_via_hlines(...)
+    if bbox:
+        return bbox
+    # 降级：coarse_top 到 bottom_fallback
+    return fitz.Rect(col_x0, coarse_top, col_x1, bottom_fallback)
+```
+
+**Step 3**：`_extract_figure_regions` 中 `img_type == 'algorithm'` 时**不再调用** `_extend_crop_for_algorithm`
+
+### 影响评估
+
+- Algorithm 路径完全独立，Figure 和 Table 路径代码不变
+- `_extend_crop_for_algorithm` 保留但不再被调用（可在验证后删除）
+- `_find_algorithm_bbox_via_hlines` 是从现有 Strategy 1 逻辑中提取，无新逻辑
+
+### 优先级
+
+P2，当前补丁（改动 1+2）已能正常工作，此改动是结构性优化，待有空推进。
