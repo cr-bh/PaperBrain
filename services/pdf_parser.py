@@ -404,6 +404,33 @@ class PDFParser:
                     table_hlines.append(r.y0)
             if table_hlines:
                 table_bottom = max(table_hlines)
+                # 向下扫描脚注文本（水平线之后的短文本，如 † ‡ 注释）
+                # 脚注通常紧跟表格底线，avg_line_len < 80 排除正文长段落
+                # 连续性检测：若当前块与上一扩展块间隔 > 15pt，停止（已超出脚注区域）
+                try:
+                    blocks = page.get_text("blocks")
+                    prev_bottom = table_bottom
+                    for b in sorted(blocks, key=lambda x: x[1]):
+                        if len(b) < 5 or b[6] != 0:
+                            continue
+                        by0, by1 = b[1], b[3]
+                        if by0 <= table_bottom:
+                            continue
+                        if by0 > table_bottom + 60:
+                            break
+                        # 连续性：与上一块间隔 > 15pt 则停止
+                        if by0 - prev_bottom > 15:
+                            break
+                        text = b[4].strip() if len(b) > 4 else ""
+                        lines = [l for l in text.split('\n') if l.strip()]
+                        avg_len = len(text) / max(len(lines), 1)
+                        if avg_len < 80:
+                            table_bottom = max(table_bottom, by1)
+                            prev_bottom = by1
+                        else:
+                            break
+                except Exception:
+                    pass
                 return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, table_bottom + 5)
 
         # ── 策略2：面积矩形（适合 Figure 图形框） ──
