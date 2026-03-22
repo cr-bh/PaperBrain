@@ -259,13 +259,22 @@ class PDFParser:
             if not rects:
                 continue
 
+            # 取所有匹配矩形的 union x 范围，避免 PyMuPDF 版本差异导致
+            # search_for 将同一行文字分成多个矩形时只取第一段，造成宽度不足
+            # 例如：Table 2 caption 被分成 3 段时，只取第一段会导致跨栏检测失败
+            cap_x0 = min(r.x0 for r in rects)
+            cap_x1 = max(r.x1 for r in rects)
+            cap_y0 = min(r.y0 for r in rects)
+            cap_y1 = max(r.y1 for r in rects)
+            cap_rect = fitz.Rect(cap_x0, cap_y0, cap_x1, cap_y1)
+
             is_table = bool(TABLE_PATTERN.match(line))
             is_algorithm = bool(re.match(
                 r'^(Algorithm|Alg\.?|Listing|Scheme)\s*\d+', line, re.IGNORECASE
             ))
             caption_hits.append({
                 "text": line,
-                "rect": rects[0],
+                "rect": cap_rect,
                 "is_table": is_table,
                 "is_algorithm": is_algorithm,
             })
