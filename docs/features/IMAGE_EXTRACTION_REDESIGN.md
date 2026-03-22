@@ -1,6 +1,6 @@
 # 论文图片提取重设计方案
 
-> **版本**: 1.3
+> **版本**: 1.4
 > **创建日期**: 2026-03-21
 > **最后更新**: 2026-03-22
 > **状态**: 主体已完成，Algorithm 专用裁剪路径待实现（TODO）
@@ -462,8 +462,9 @@ page.get_text("blocks") 返回空（极少数加密 PDF）
 3. ✅ **`ui/paper_detail.py`**：同步更新 `sections` 配置，支持 `table` 和 `figure` 类型展示
 4. ✅ **修复 Fig. 1 跨栏大图上边界截取问题**（见十二节）
 5. ✅ **修复 Algorithm 正文引用句误判 + 伪代码扩展越界**（见十三节）
-6. 🔲 **TODO：Algorithm 专用裁剪路径**（见十四节）
-7. 🔲 使用至少 3 篇不同类型论文（纯光栅图、纯矢量图、混合）验证提取结果
+6. ✅ **针对 ATTENTION RESIDUALS.pdf 的全面修复**（见十五节）
+7. 🔲 **TODO：Algorithm 专用裁剪路径**（见十四节）
+8. 🔲 使用至少 3 篇不同类型论文（纯光栅图、纯矢量图、混合）验证提取结果
 
 ---
 
@@ -480,6 +481,11 @@ page.get_text("blocks") 返回空（极少数加密 PDF）
 - [x] Fig. 1 跨栏大图完整提取（上边界不截取）
 - [x] Algorithm 正文引用句不再被误判为 Caption
 - [x] Algorithm 伪代码截取不越界到 APPENDIX/REFERENCES
+- [x] Figure 页眉水平线不再被误判为图片边框
+- [x] Figure 顶部文本标签（Output、VIRTUAL STAGE 等）完整截取
+- [x] Table 底部包含完整脚注（† ‡ 注释行）
+- [x] 跨栏图（Figure 4 等）不再被截成左半边
+- [x] PyMuPDF 版本兼容：search_for 多段返回时 caption 宽度正确
 - [ ] **TODO：Algorithm 裁剪策略与实际结构对齐**（见十四节）
 
 ---
@@ -609,3 +615,72 @@ elif hit.get("is_algorithm"):
 ### 优先级
 
 P2，当前补丁（改动 1+2）已能正常工作，此改动是结构性优化，待有空推进。
+
+---
+
+## 十五、已修复：ATTENTION RESIDUALS.pdf 全面修复（v1.4）
+
+**测试 PDF**：`ATTENTION RESIDUALS.pdf`（Kimi Team 技术报告，双栏，含复杂矢量图、宽表格、页眉装饰线）
+
+### 修复 1：Figure 页眉水平线误判（`_find_content_bbox_via_drawings`）
+
+**现象**：Figure 1/3/5/6/8 的 crop 从页眉线（y≈47~80）开始，包含大量正文。
+
+**根因**：Strategy 1（水平线对）原本为 Algorithm 框设计，但对所有类型都执行。该 PDF 每页有全页宽页眉装饰线（w=468pt），满足「宽度 > 30% 栏宽」条件，被误判为图片边框。
+
+**修复**：新增 `is_algorithm` 参数，Strategy 1 仅在 `is_algorithm=True` 时执行；Strategy 2 的 rw 阈值从 `col_width*0.3` 改为 `min(col_width*0.1, 20)`，确保细长 drawing 组成的图（神经网络示意图）也能正确定位。
+
+### 修复 2：Figure 顶部文本标签遗漏（`_determine_crop_rect`）
+
+**现象**：Figure 1 缺失顶部 "Output" 标签（22pt），Figure 3 缺失 "VIRTUAL STAGE 0/1" 标签（14pt）。
+
+**根因**：Strategy 2 只扫描 drawing，不扫描文本。图片顶部由文本标签组成时，`bbox.y0` 来自最小 drawing 的 y，比文本标签低 14~22pt。
+
+**修复**：Figure 路径中，bbox 不为 None 后向上额外扫描 bbox.y0 上方 30pt 内与 bbox x 范围有实质重叠的短文本块（avg_line_len < 30），将 crop_top 扩展到这些文本块的 y0-3。
+
+### 修复 3：Table 底部截断脚注（Strategy 1b）
+
+**现象**：Table 2 crop bottom=191，脚注（† ‡ ⋆ 三行注释，y=182.8~214.6）被截断。
+
+**根因**：Strategy 1b 只找水平线最大 y（y=181.1），脚注在水平线之后，未被纳入。
+
+**修复**：找到 `table_bottom` 后，向下扫描 `table_bottom+60pt` 内的连续短文本块（间隔≤15pt，avg_len<80），扩展到脚注底部。连续性检测确保不会跨越 Figure 4 图表内容（间距 21.8pt > 15pt 触发停止）。
+
+同时将 Strategy 1b 水平线宽度阈值从 `col_width*0.3` 提高到 `col_width*0.5`，防止图表内部线条（w=181.9pt < 50%=286pt）被误判为表格底线。
+
+### 修复 4：Figure 4 跨栏检测失败（`_extract_figure_regions`）
+
+**现象**：Figure 4 被截成左半边（792px），实际应为全页宽（1144px）。
+
+**根因**：Figure 4 caption 右边界 367.7pt，右栏左边界 369pt，差 1.3pt，几何法跨栏检测（margin=5pt）失败，图表被限制在左栏（x=20~359），而 drawings x 范围达 228~413。
+
+**修复**：`_determine_crop_rect` 返回后，检查 `crop.x1 > col_x1 + 20`——若超出当前栏边界，说明图表实际跨栏，自动扩展为全页宽并重新计算。
+
+### 修复 5：Figure 8 误分类为 architecture（`_classify_caption`）
+
+**现象**：Figure 8（分布图）被分类为 `architecture`，显示在"系统架构图"区域。
+
+**根因**：architecture 关键词包含 `model`，而 Figure 8 caption 含 `model`（指模型规格，非架构图）。
+
+**修复**：从 architecture 关键词中移除 `model`，同步修改 `image_extractor._classify_image_type`。
+
+### 修复 6：PyMuPDF 版本兼容（`_collect_caption_rects`）
+
+**现象**：Paper Brain 重启后 Table 2 仍只截左半边（690×743px）。
+
+**根因**：Paper Brain 使用 anaconda 的 PyMuPDF 1.23.x，`search_for` 将同一行长文字分成多个矩形（Table 2 caption 被分为 3 段），原代码只取 `rects[0]`（第一段，x=71~209，宽度 137pt），导致跨栏检测失败。用 homebrew Python 测试时 `search_for` 返回单个矩形，掩盖了此问题。
+
+**修复**：取所有 `rects` 的 union x/y 范围构造 caption rect，确保跨 PyMuPDF 版本一致性。修复后 caption 宽度 137pt → 312pt，跨栏检测正确，图片 690×743px → 1156×301px。
+
+### 验证结果（三个 PDF 全部通过）
+
+| 图片 | 修复前 | 修复后 |
+|------|--------|--------|
+| Figure 1 | 1144×494px（缺 Output 标签） | **1144×538px** |
+| Figure 3 | 1144×269px（缺 VIRTUAL STAGE） | **1144×302px** |
+| Figure 4 | 792×464px（左半边） | **1144×464px** |
+| Figure 8 | 分类为 architecture | **分类为 figure** |
+| Table 2 | 690×743px（左半边+含 Figure 4） | **1156×301px** |
+| Table 1/3/4/5 | crop 到页面底部 | **精确到表格底线+脚注** |
+| auto-multi-obj 所有图 | 正常 | **不变** |
+| AL_iLQR_Tutorial 所有图 | 正常 | **不变** |
