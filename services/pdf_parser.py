@@ -199,6 +199,11 @@ class PDFParser:
         # 排除正文引用句：含有动词说明这是正文在引用图表，而非 Caption 本身
         if _BODY_TEXT_VERBS_RE.search(line):
             return False
+        # 排除 "Algorithm N. 大写字母..." 格式的正文引用句
+        # 真正的伪代码标题格式是 "Algorithm N Name" 或 "Algorithm N: Name"，无句点分隔
+        # 例如：'Algorithm 3. We now proceed...' → 正文；'Algorithm 3 Iterative LQR' → Caption
+        if re.match(r'^(Algorithm|Alg\.?)\s*\d+\.\s+[A-Z]', line):
+            return False
         return True
 
     def _collect_caption_rects(self, page: fitz.Page) -> List[Dict]:
@@ -539,9 +544,15 @@ class PDFParser:
             # 停止条件：
             # 1. 行平均长度 > 40 → 正文段落
             # 2. 与上一块间隙 > 25pt 且行平均长度 > 25 → 伪代码已结束，后面是正文
+            # 3. 全大写单词行（节标题，如 APPENDIX、REFERENCES、ACKNOWLEDGMENT）
+            # 4. 参考文献条目（以 [数字] 开头）
             if avg_line_len > 40:
                 break
             if gap > 25 and avg_line_len > 25:
+                break
+            if re.match(r'^[A-Z][A-Z\s\-]{3,}$', text.strip()):
+                break
+            if re.match(r'^\[\d+\]', text.strip()):
                 break
 
             # 伪代码行：继续扩展
