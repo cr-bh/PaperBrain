@@ -384,7 +384,9 @@ class PDFParser:
         # ── 策略1b：Table 底部水平线定位 ──
         # Table 的框线是水平线（rh≈0），Strategy 1 仅对 Algorithm 启用，
         # 但 Table 同样需要水平线来确定底部边界。
-        # 找 caption 下方所有宽度 ≥ 30% 栏宽的水平线，取 y 最大的作为表格底部。
+        # 找 caption 下方所有宽度 ≥ 50% 栏宽的水平线，取 y 最大的作为表格底部。
+        # 阈值用 50%（而非 30%）：Table 框线通常横跨大部分表格宽度，
+        # 图表内部线条较窄，50% 阈值能有效区分表格线和图表线。
         if not search_above:
             table_hlines = []
             for d in drawings:
@@ -393,7 +395,7 @@ class PDFParser:
                     continue
                 rw = r.x1 - r.x0
                 rh = r.y1 - r.y0
-                if rh >= 3 or rw < col_width * 0.3:
+                if rh >= 3 or rw < col_width * 0.5:
                     continue
                 r_cx = (r.x0 + r.x1) / 2
                 if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
@@ -500,9 +502,36 @@ class PDFParser:
             if bbox is not None:
                 # bbox.y1 可能超过 Caption（Algorithm 框内容在 Caption 下方）
                 # 取 bbox 整体范围，确保内容完整
+                crop_top = bbox.y0 - 3
+
+                # Figure 路径：向上扫描 bbox.y0 上方 30pt 内的短文本标签
+                # 部分图片顶部由文本标签组成（如 "Output"、"VIRTUAL STAGE"），
+                # Strategy 2 只扫描 drawing，会遗漏这些文本标签。
+                # 条件：① 在 bbox.y0 上方 30pt 内；② x 范围与 bbox 有实质重叠；
+                #       ③ avg_line_len < 30（排除正文段落，只纳入图片内短标签）
+                if not is_algorithm and page is not None:
+                    try:
+                        blocks = page.get_text("blocks")
+                        for b in blocks:
+                            if len(b) < 5 or b[6] != 0:
+                                continue
+                            bx0, by0, bx1, by1 = b[0], b[1], b[2], b[3]
+                            if by0 >= bbox.y0 or by0 < bbox.y0 - 30:
+                                continue
+                            # x 范围与 bbox 有实质重叠（各自内缩 10pt 避免边界误判）
+                            if bx1 <= bbox.x0 + 10 or bx0 >= bbox.x1 - 10:
+                                continue
+                            text = b[4].strip() if len(b) > 4 else ""
+                            lines = [l for l in text.split('\n') if l.strip()]
+                            avg_len = len(text) / max(len(lines), 1)
+                            if avg_len < 30:
+                                crop_top = min(crop_top, by0 - 3)
+                    except Exception:
+                        pass
+
                 return fitz.Rect(
                     min(col_x0, bbox.x0 - 3),
-                    bbox.y0 - 3,
+                    crop_top,
                     max(col_x1, bbox.x1 + 3),
                     max(cap_rect.y1 + 3, bbox.y1 + 5)
                 )
