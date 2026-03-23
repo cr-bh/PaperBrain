@@ -199,7 +199,8 @@ def get_effective_api_params(role: str) -> Dict[str, Any]:
             'api_token': api_key,
             'model': role_cfg.get('model', provider['default_model']),
             'api_format': 'openai',
-            'custom_ssl': False,
+            # 部分内部提供商（如 Friday）需要自定义 SSL 处理
+            'custom_ssl': provider.get('custom_ssl', False),
             'temperature': role_cfg.get('temperature', 0.7),
             'max_tokens': role_cfg.get('max_tokens', 8192),
         }

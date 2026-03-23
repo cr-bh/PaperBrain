@@ -97,14 +97,21 @@ class LLMService:
             "Authorization": f"Bearer {self._api_token}",
             "Content-Type": "application/json; charset=utf-8",
         }
+        # 部分模型（如 qwen3 系列）在 non-streaming 模式下存在输出为空的问题，
+        # 对这类模型统一使用 streaming 模式采集完整内容
+        use_stream = self._should_use_stream()
         payload = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
+            "stream": use_stream,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
         json_data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+
+        if use_stream:
+            return self._call_openai_api_stream(headers, json_data)
+
         response = self._session.post(
             self._api_url, headers=headers, data=json_data, timeout=120
         )
@@ -118,6 +125,142 @@ class LLMService:
                 f"API 响应格式不正确: {e}。"
                 f"响应: {json.dumps(result, ensure_ascii=False)[:500]}"
             )
+
+    def _should_use_stream(self) -> bool:
+        """判断是否需要使用 streaming 模式。
+        qwen3 系列模型在部分接口的 non-streaming 模式下存在输出为空的问题。
+        """
+        model_lower = self._model.lower()
+        return 'qwen3' in model_lower
+
+    def _preprocess_prompt_for_model(self, prompt: str) -> str:
+        """针对特定模型对 prompt 进行预处理。
+
+        qwen3 系列问题根因（两层）：
+        1. JSON 模板出现在论文内容之前时，qwen3 将其视为「最终输出」直接复制，不读论文
+        2. summary_struct 嵌套结构导致 qwen3 只填 title/authors，嵌套字段留空
+
+        修复：
+        1. 将 JSON 格式要求移到论文内容之后
+        2. 将 summary_struct 的嵌套字段展开为顶层字段，调用后在 _postprocess_qwen3 中重新包装
+        """
+        if 'qwen3' not in self._model.lower():
+            return prompt
+
+        json_start = prompt.find('{')
+        paper_text_marker = '论文全文：'
+        paper_text_pos = prompt.rfind(paper_text_marker)
+
+        if json_start == -1 or paper_text_pos == -1 or json_start >= paper_text_pos:
+            return prompt
+
+        # qwen3 对包含复杂 Markdown 格式指令（**粗体**、有序列表、`代码`、**输出格式** 等）
+        # 的 prompt 会直接输出空 JSON，不阅读论文内容。
+        # 对 qwen3 使用极简指令，完全绕过原有复杂指令。
+        instructions = (
+            '你是学术研究专家。请仔细阅读以下论文，用中文详细分析。'
+            'title 填论文的实际标题（原文，不要解释），'
+            'authors 填作者列表，'
+            '其余字段每个至少100字的详细分析。'
+        )
+
+        # paper_part 从「论文全文：」开始，去掉末尾的「记住：」指令行（如果有）
+        paper_part_raw = prompt[paper_text_pos:]
+        remember_marker = '记住：仅输出有效的 JSON'
+        remember_pos = paper_part_raw.find(remember_marker)
+        paper_part = paper_part_raw[:remember_pos].rstrip() if remember_pos != -1 else paper_part_raw
+
+        # qwen3 在 Friday 接口上对超过约 3500 tokens 的 prompt 直接输出空 JSON
+        # 安全阈值：论文文本截断到 8000 字符（约 2700 tokens），加上指令约 3000 tokens 以内
+        QWEN3_MAX_PAPER_CHARS = 8000
+        paper_header = '论文全文：'
+        paper_content_start = paper_part.find(paper_header)
+        if paper_content_start != -1:
+            paper_content = paper_part[paper_content_start + len(paper_header):]
+            if len(paper_content) > QWEN3_MAX_PAPER_CHARS:
+                paper_content = paper_content[:QWEN3_MAX_PAPER_CHARS] + '\n\n[文本已截断，请基于以上内容分析]'
+                paper_part = paper_header + paper_content
+
+        # 扁平化 JSON 模板：将 summary_struct 嵌套字段展开到顶层
+        # qwen3 对嵌套 JSON 字段不填充，但对顶层字段能正常工作
+        flat_schema = (
+            '{\n'
+            '  "title": "",\n'
+            '  "authors": [],\n'
+            '  "one_sentence_summary": "",\n'
+            '  "problem_definition": "",\n'
+            '  "existing_solutions": "",\n'
+            '  "limitations": "",\n'
+            '  "contribution": "",\n'
+            '  "methodology": "",\n'
+            '  "results": "",\n'
+            '  "future_work_paper": "",\n'
+            '  "future_work_insights": ""\n'
+            '}'
+        )
+
+        # 重排：指令 → 论文内容 → 扁平 JSON 格式要求
+        return (
+            instructions + '\n\n'
+            + paper_part + '\n\n'
+            + '请根据上面的论文内容，详细填写以下 JSON 的每个字段（每字段至少 100 字），'
+            '仅输出 JSON，不要有其他文字：\n'
+            + flat_schema
+        )
+
+    def _postprocess_qwen3_response(self, text: str) -> str:
+        """将 qwen3 返回的扁平 JSON 重新包装为标准的嵌套格式（含 summary_struct）。"""
+        import json as _json
+        try:
+            flat = _json.loads(text)
+        except Exception:
+            return text  # 解析失败，原样返回
+
+        # 如果已经是标准格式（含 summary_struct），不需要转换
+        if 'summary_struct' in flat:
+            return text
+
+        summary_fields = [
+            'one_sentence_summary', 'problem_definition', 'existing_solutions',
+            'limitations', 'contribution', 'methodology', 'results',
+            'future_work_paper', 'future_work_insights'
+        ]
+        summary_struct = {k: flat.pop(k, '') for k in summary_fields}
+        flat['summary_struct'] = summary_struct
+
+        return _json.dumps(flat, ensure_ascii=False, indent=2)
+
+    def _call_openai_api_stream(self, headers: dict, json_data: bytes) -> str:
+        """使用 streaming 模式调用 OpenAI 兼容接口，采集完整输出内容。"""
+        response = self._session.post(
+            self._api_url, headers=headers, data=json_data,
+            timeout=180, stream=True
+        )
+        response.raise_for_status()
+
+        full_content = []
+        for line in response.iter_lines():
+            if not line:
+                continue
+            line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+            if not line_str.startswith('data: '):
+                continue
+            data_str = line_str[6:]
+            if data_str == '[DONE]':
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk['choices'][0].get('delta', {})
+                content = delta.get('content', '')
+                if content:
+                    full_content.append(content)
+            except (json.JSONDecodeError, KeyError, IndexError):
+                continue
+
+        result = ''.join(full_content)
+        if not result:
+            raise ValueError("Streaming 模式未返回任何内容，请检查模型配置。")
+        return result
 
     # ========== Gemini 格式 ==========
 
@@ -179,6 +322,9 @@ class LLMService:
         temp = temperature if temperature is not None else self._temperature
         tokens = max_tokens if max_tokens is not None else self._max_tokens
 
+        # 针对特定模型预处理 prompt（如 qwen3 的 schema 占位符问题）
+        prompt = self._preprocess_prompt_for_model(prompt)
+
         if self._api_format == 'gemini':
             return self._call_gemini_api(prompt, temp, tokens)
         else:
@@ -194,6 +340,9 @@ class LLMService:
                       max_tokens: int = None) -> Dict[str, Any]:
         from utils.helpers import extract_json_from_text
         text = self._call_api(prompt, temperature, max_tokens)
+        # qwen3 返回扁平 JSON，需要重新包装为嵌套格式
+        if 'qwen3' in self._model.lower():
+            text = self._postprocess_qwen3_response(text)
         return extract_json_from_text(text)
 
     def count_tokens(self, text: str) -> int:
