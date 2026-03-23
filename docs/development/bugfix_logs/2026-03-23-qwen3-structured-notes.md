@@ -225,10 +225,51 @@ extract_json_from_text(text)
 
 ---
 
+## 🐛 后续 Bug：title 字段填成长描述文字
+
+### 问题描述
+
+结构化笔记内容正常后，论文详情页标题显示为一段百余字的描述性文字，例如：
+
+> 「本教程论文标题为《AL-iLQR Tutorial》，其核心内容是介绍一种结合增广拉格朗日方法与迭代线性二次调节器（iLQR）的轨迹优化算法...」
+
+而非论文的实际标题 `AL-iLQR Tutorial`。
+
+### 根因
+
+极简指令中包含「**每个字段至少100字**」的要求，qwen3 将此理解为包括 `title` 字段，于是对 `title` 也写了100字以上的解释性内容。
+
+### 修复
+
+在极简指令中**明确区分**不同字段的填写要求：
+
+```python
+# 修复前
+instructions = '你是学术研究专家。请仔细阅读以下论文，用中文详细分析，每个字段至少100字。'
+
+# 修复后
+instructions = (
+    '你是学术研究专家。请仔细阅读以下论文，用中文详细分析。'
+    'title 填论文的实际标题（原文，不要解释），'
+    'authors 填作者列表，'
+    '其余字段每个至少100字的详细分析。'
+)
+```
+
+### 验证结果
+
+| 字段 | 修复前 | 修复后 |
+|------|--------|--------|
+| `title` | 「本教程论文标题为《AL-iLQR Tutorial》，其核心内容是...」（150字） | **`AL-iLQR Tutorial`** |
+| `authors` | `['Brian Jackson']` | `['Brian Jackson']` ✅ |
+| `problem_definition` | 100字以上详细内容 ✅ | 100字以上详细内容 ✅ |
+
+---
+
 ## 🔗 相关文件
 
 | 文件 | 改动 |
 |------|------|
-| `services/llm_service.py` | 新增 `_preprocess_prompt_for_model`、`_postprocess_qwen3_response`、`_should_use_stream`、`_call_openai_api_stream` |
+| `services/llm_service.py` | 新增 `_preprocess_prompt_for_model`、`_postprocess_qwen3_response`、`_should_use_stream`、`_call_openai_api_stream`；修复极简指令区分 title/authors 与内容字段 |
 | `services/api_config.py` | 新增 `friday` 提供商，`get_effective_api_params` 支持 provider 的 `custom_ssl` 字段 |
 | `requirements.txt` | 补全 `plotly`、`arxiv`、`urllib3` |
