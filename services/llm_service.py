@@ -154,20 +154,27 @@ class LLMService:
         if json_start == -1 or paper_text_pos == -1 or json_start >= paper_text_pos:
             return prompt
 
-        # instructions：JSON schema 之前的文字，去掉末尾的「输出格式」提示行
-        # 这行会触发 qwen3 直接输出空 JSON 而不阅读论文
-        output_format_marker = '**输出格式'
-        output_format_pos = prompt[:json_start].rfind(output_format_marker)
-        if output_format_pos != -1:
-            instructions = prompt[:output_format_pos].rstrip()
-        else:
-            instructions = prompt[:json_start].rstrip()
+        # qwen3 对包含复杂 Markdown 格式指令（**粗体**、有序列表、`代码`、**输出格式** 等）
+        # 的 prompt 会直接输出空 JSON，不阅读论文内容。
+        # 对 qwen3 使用极简指令，完全绕过原有复杂指令。
+        instructions = '你是学术研究专家。请仔细阅读以下论文，用中文详细分析，每个字段至少100字。'
 
         # paper_part 从「论文全文：」开始，去掉末尾的「记住：」指令行（如果有）
         paper_part_raw = prompt[paper_text_pos:]
         remember_marker = '记住：仅输出有效的 JSON'
         remember_pos = paper_part_raw.find(remember_marker)
         paper_part = paper_part_raw[:remember_pos].rstrip() if remember_pos != -1 else paper_part_raw
+
+        # qwen3 在 Friday 接口上对超过约 3500 tokens 的 prompt 直接输出空 JSON
+        # 安全阈值：论文文本截断到 8000 字符（约 2700 tokens），加上指令约 3000 tokens 以内
+        QWEN3_MAX_PAPER_CHARS = 8000
+        paper_header = '论文全文：'
+        paper_content_start = paper_part.find(paper_header)
+        if paper_content_start != -1:
+            paper_content = paper_part[paper_content_start + len(paper_header):]
+            if len(paper_content) > QWEN3_MAX_PAPER_CHARS:
+                paper_content = paper_content[:QWEN3_MAX_PAPER_CHARS] + '\n\n[文本已截断，请基于以上内容分析]'
+                paper_part = paper_header + paper_content
 
         # 扁平化 JSON 模板：将 summary_struct 嵌套字段展开到顶层
         # qwen3 对嵌套 JSON 字段不填充，但对顶层字段能正常工作
