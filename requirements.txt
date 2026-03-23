@@ -23,6 +23,13 @@ python-dotenv==1.0.1
 # Utilities
 pillow==10.2.0
 requests==2.31.0
+urllib3>=1.26.0
+
+# Data Visualization
+plotly>=5.0.0
+
+# Arxiv API
+arxiv>=2.0.0
 
 # Streamlit Components
 streamlit-mermaid==0.3.0
