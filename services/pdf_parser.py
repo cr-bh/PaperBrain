@@ -328,7 +328,8 @@ class PDFParser:
                                          col_x0: float, col_x1: float,
                                          search_above: bool = True,
                                          search_top: float = 0.0,
-                                         is_algorithm: bool = False) -> "fitz.Rect | None":
+                                         is_algorithm: bool = False,
+                                         search_bottom: float = 0.0) -> "fitz.Rect | None":
         """
         用 get_drawings() 找 Caption 附近的图形/算法框边界。
         两种策略：
@@ -396,6 +397,7 @@ class PDFParser:
         # 找 caption 下方所有宽度 ≥ 50% 栏宽的水平线，取 y 最大的作为表格底部。
         # 阈值用 50%（而非 30%）：Table 框线通常横跨大部分表格宽度，
         # 图表内部线条较窄，50% 阈值能有效区分表格线和图表线。
+        # search_bottom：扫描上边界（下一个 caption 的 y0），避免把相邻 Table 的水平线纳入。
         if not search_above:
             table_hlines = []
             for d in drawings:
@@ -409,8 +411,12 @@ class PDFParser:
                 r_cx = (r.x0 + r.x1) / 2
                 if not (col_x0 - 20 <= r_cx <= col_x1 + 20):
                     continue
-                if r.y0 > cap_rect.y1:  # caption 下方
-                    table_hlines.append(r.y0)
+                if r.y0 <= cap_rect.y1:  # caption 上方，跳过
+                    continue
+                # search_bottom > 0 时，不越过下一个 caption（避免纳入相邻表格的水平线）
+                if search_bottom > 0 and r.y0 >= search_bottom:
+                    continue
+                table_hlines.append(r.y0)
             if table_hlines:
                 table_bottom = max(table_hlines)
                 # 向下扫描脚注文本（水平线之后的短文本，如 † ‡ 注释）
@@ -441,6 +447,34 @@ class PDFParser:
                 except Exception:
                     pass
                 return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, table_bottom + 5)
+            else:
+                # Strategy 1b 降级：找不到水平线时，用表格文本内容的实际底部
+                # 避免直接用 next_caption_y（可能延伸到页面底部包含大量正文）
+                # 扫描 caption 下方的文本块，遇到第一个正文段落（avg_len > 50）时停止
+                if page is not None:
+                    try:
+                        blocks = page.get_text("blocks")
+                        text_bottom = cap_rect.y1
+                        scan_limit = search_bottom if search_bottom > 0 else cap_rect.y1 + 300
+                        for b in sorted(blocks, key=lambda x: x[1]):
+                            if len(b) < 5 or b[6] != 0:
+                                continue
+                            by0, by1 = b[1], b[3]
+                            if by0 <= cap_rect.y1:
+                                continue
+                            if by0 >= scan_limit:
+                                break
+                            text = b[4].strip() if len(b) > 4 else ""
+                            lines = [l for l in text.split('\n') if l.strip()]
+                            avg_len = len(text) / max(len(lines), 1)
+                            if avg_len > 50:
+                                # 遇到正文段落，表格内容已结束
+                                break
+                            text_bottom = by1
+                        if text_bottom > cap_rect.y1:
+                            return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, text_bottom + 5)
+                    except Exception:
+                        pass
 
         # ── 策略2：面积矩形（适合 Figure 图形框） ──
         # 取所有候选矩形的 union（包围盒），而非单个"最优"矩形。
@@ -496,11 +530,21 @@ class PDFParser:
 
         if hit["is_table"]:
             # Table：Caption 在上方，内容在下方
+            # 计算下一个同栏 caption 的 y0，作为水平线扫描的上边界
+            # 避免把相邻 Table 的水平线纳入当前 Table 的底部计算
+            same_col_hits = [
+                h for h in caption_hits
+                if h is not hit and self._in_same_column(h["rect"], col_x0, col_x1)
+            ]
+            next_ys = [h["rect"].y0 for h in same_col_hits if h["rect"].y0 > cap_rect.y1 + 10]
+            next_caption_y = min(next_ys) if next_ys else 0.0
+
             bbox = None
             if page is not None:
                 bbox = self._find_content_bbox_via_drawings(
                     page, cap_rect, col_x0, col_x1,
-                    search_above=False, is_algorithm=False
+                    search_above=False, is_algorithm=False,
+                    search_bottom=next_caption_y
                 )
             if bbox is not None:
                 return fitz.Rect(
@@ -509,13 +553,8 @@ class PDFParser:
                     max(col_x1, bbox.x1 + 3),
                     bbox.y1 + 5
                 )
-            # 降级：用下一个同栏 Caption
-            same_col_hits = [
-                h for h in caption_hits
-                if h is not hit and self._in_same_column(h["rect"], col_x0, col_x1)
-            ]
-            next_ys = [h["rect"].y0 for h in same_col_hits if h["rect"].y0 > cap_rect.y1 + 10]
-            bottom = (min(next_ys) - 5) if next_ys else (page_rect.y1 - 20)
+            # 降级：用下一个同栏 Caption（已在上方计算）
+            bottom = (next_caption_y - 5) if next_caption_y > 0 else (page_rect.y1 - 20)
             return fitz.Rect(col_x0, cap_rect.y0 - 3, col_x1, bottom)
 
         else:
