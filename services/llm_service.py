@@ -157,7 +157,12 @@ class LLMService:
         # qwen3 对包含复杂 Markdown 格式指令（**粗体**、有序列表、`代码`、**输出格式** 等）
         # 的 prompt 会直接输出空 JSON，不阅读论文内容。
         # 对 qwen3 使用极简指令，完全绕过原有复杂指令。
-        instructions = '你是学术研究专家。请仔细阅读以下论文，用中文详细分析，每个字段至少100字。'
+        instructions = (
+            '你是学术研究专家。请仔细阅读以下论文，用中文详细分析。'
+            'title 填论文的实际标题（原文，不要解释），'
+            'authors 填作者列表，'
+            '其余字段每个至少100字的详细分析。'
+        )
 
         # paper_part 从「论文全文：」开始，去掉末尾的「记住：」指令行（如果有）
         paper_part_raw = prompt[paper_text_pos:]
