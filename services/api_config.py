@@ -59,6 +59,21 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "default_model": "deepseek-ai/DeepSeek-V3",
         "doc_url": "https://cloud.siliconflow.cn/account/ak",
     },
+    "friday": {
+        "name": "Friday One-API (美团内部)",
+        "api_base": "https://aigc.sankuai.com/v1/openai/native/chat/completions",
+        "models": [
+            "qwen3-max-preview",
+            "deepseek-v3-friday",
+            "deepseek-r1-friday",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "LongCat-8B-128K-Chat",
+        ],
+        "default_model": "qwen3-max-preview",
+        "doc_url": "https://aigc.sankuai.com",
+        "custom_ssl": True,
+    },
 }
 
 # ========== 默认配置模板 ==========
@@ -199,7 +214,8 @@ def get_effective_api_params(role: str) -> Dict[str, Any]:
             'api_token': api_key,
             'model': role_cfg.get('model', provider['default_model']),
             'api_format': 'openai',
-            'custom_ssl': False,
+            # 部分内部提供商（如 Friday）需要自定义 SSL 处理
+            'custom_ssl': provider.get('custom_ssl', False),
             'temperature': role_cfg.get('temperature', 0.7),
             'max_tokens': role_cfg.get('max_tokens', 8192),
         }
