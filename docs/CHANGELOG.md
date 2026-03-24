@@ -4,6 +4,17 @@
 
 ---
 
+## [v1.6.0] - 2026-03-24
+
+### ✨ 新增功能
+- 新增 Obsidian 导出功能：论文详情页一键导出结构化笔记到本地 Obsidian vault
+- 导出格式：YAML frontmatter + 8 维摘要 + Mermaid 思维导图代码块
+- 设置页新增「📁 Obsidian 集成」配置区块（vault 路径 + 子目录 + 路径验证）
+
+详细内容请参考 [v1.6.0 更新日志](changelogs/v1.6.0/UPDATE_LOG.md) 和 [Obsidian 导出功能文档](features/OBSIDIAN_EXPORT.md)
+
+---
+
 ## [v1.5.1] - 2026-02-28
 
 ### 🐛 Bug 修复
