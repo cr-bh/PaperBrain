@@ -33,7 +33,26 @@ def show_paper_detail():
             st.rerun()
 
     with col3:
-        if st.button("🗑️ 删除论文", type="secondary"):
+        if st.button("📤 导出到 Obsidian", use_container_width=True):
+            from services.api_config import get_obsidian_config
+            from services.obsidian_exporter import export_paper_to_obsidian
+            obs_cfg = get_obsidian_config()
+            if not obs_cfg.get("vault_path"):
+                st.warning("请先在「设置」页配置 Obsidian vault 路径")
+            else:
+                try:
+                    tags = db_manager.get_paper_tags(paper_id)
+                    result_path = export_paper_to_obsidian(
+                        paper, tags,
+                        vault_path=obs_cfg["vault_path"],
+                        sub_dir=obs_cfg.get("sub_dir", "Papers"),
+                    )
+                    st.success(f"✓ 已导出到 `{result_path}`")
+                except ValueError as e:
+                    st.error(str(e))
+                except Exception as e:
+                    st.error(f"导出失败: {e}")
+        if st.button("🗑️ 删除论文", type="secondary", use_container_width=True):
             st.session_state.show_delete_confirm = True
 
     # 删除确认对话框

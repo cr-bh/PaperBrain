@@ -5,6 +5,7 @@ API 设置页面
 import streamlit as st
 from services.api_config import (
     PROVIDERS, load_config, save_config, get_effective_api_params,
+    get_obsidian_config, save_obsidian_config,
 )
 
 
@@ -247,6 +248,44 @@ def show_settings():
             save_config(cfg)
             _reload_services()
             st.success("配置已保存！评分 LLM 将使用主 LLM 的 API。")
+
+    st.markdown("---")
+
+    # ==================== Obsidian 集成 ====================
+    with st.expander("📁 Obsidian 集成", expanded=False):
+        obs_cfg = get_obsidian_config()
+
+        vault_path = st.text_input(
+            "Obsidian Vault 路径",
+            value=obs_cfg.get("vault_path", ""),
+            key="obs_vault_path",
+            placeholder="/Users/yourname/ObsidianVault",
+            help="Obsidian vault 的根目录绝对路径，例如 ~/Documents/MyVault",
+        )
+        sub_dir = st.text_input(
+            "论文子目录名",
+            value=obs_cfg.get("sub_dir", "Papers"),
+            key="obs_sub_dir",
+            placeholder="Papers",
+            help="在 vault 内存放论文笔记的子目录名，不存在时会自动创建",
+        )
+
+        col_verify, col_save_obs = st.columns([1, 1])
+        with col_verify:
+            if st.button("🔍 验证路径", key="obs_verify", use_container_width=True):
+                from pathlib import Path
+                p = Path(vault_path).expanduser() if vault_path else None
+                if not vault_path:
+                    st.warning("请先填写 vault 路径")
+                elif p and p.exists():
+                    st.success(f"✓ 路径有效：{p.resolve()}")
+                else:
+                    st.error(f"路径不存在：{vault_path}")
+        with col_save_obs:
+            if st.button("💾 保存 Obsidian 配置", key="obs_save", type="primary",
+                          use_container_width=True):
+                save_obsidian_config(vault_path.strip(), sub_dir.strip() or "Papers")
+                st.success("Obsidian 配置已保存！")
 
     st.markdown("---")
 

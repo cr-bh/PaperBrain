@@ -248,3 +248,45 @@ def get_provider_list() -> List[Dict[str, str]]:
         {"key": k, "name": v["name"], "doc_url": v.get("doc_url", "")}
         for k, v in PROVIDERS.items()
     ]
+
+
+# ========== Obsidian 集成配置 ==========
+
+DEFAULT_OBSIDIAN_CONFIG = {
+    "vault_path": "",
+    "sub_dir": "Papers",
+    "enabled": False,
+}
+
+
+def get_obsidian_config() -> Dict[str, Any]:
+    """获取 Obsidian 集成配置"""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+            obs = copy.deepcopy(DEFAULT_OBSIDIAN_CONFIG)
+            obs.update(saved.get('obsidian', {}))
+            return obs
+        except (json.JSONDecodeError, IOError):
+            pass
+    return copy.deepcopy(DEFAULT_OBSIDIAN_CONFIG)
+
+
+def save_obsidian_config(vault_path: str, sub_dir: str) -> None:
+    """保存 Obsidian 集成配置"""
+    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    saved: Dict[str, Any] = {}
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    saved['obsidian'] = {
+        "vault_path": vault_path,
+        "sub_dir": sub_dir,
+        "enabled": bool(vault_path),
+    }
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(saved, f, ensure_ascii=False, indent=2)
