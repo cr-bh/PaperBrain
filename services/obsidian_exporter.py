@@ -93,6 +93,7 @@ source: paperbrain
             "## 🗺️ 思维导图",
             "",
             "```mermaid",
+            "%%{init: {'theme': 'default', 'flowchart': {'useMaxWidth': false}}}%%",
             paper.mindmap_code.strip(),
             "```",
             "",
