@@ -33,6 +33,11 @@ def show_paper_detail():
             st.rerun()
 
     with col3:
+        include_mindmap = st.checkbox(
+            "包含思维导图",
+            value=False,
+            key=f"export_mindmap_{paper_id}",
+        )
         if st.button("📤 导出到 Obsidian", use_container_width=True):
             from services.api_config import get_obsidian_config
             from services.obsidian_exporter import export_paper_to_obsidian
@@ -46,6 +51,7 @@ def show_paper_detail():
                         paper, tags,
                         vault_path=obs_cfg["vault_path"],
                         sub_dir=obs_cfg.get("sub_dir", "Papers"),
+                        include_mindmap=include_mindmap,
                     )
                     st.success(f"✓ 已导出到 `{result_path}`")
                 except ValueError as e:

@@ -99,7 +99,7 @@ def sanitize_filename(title: str) -> str:
     return sanitized[:200] if len(sanitized) > 200 else sanitized
 
 
-def generate_obsidian_md(paper, tags: list) -> str:
+def generate_obsidian_md(paper, tags: list, include_mindmap: bool = True) -> str:
     """
     生成 Obsidian Markdown 字符串
     格式：YAML frontmatter + Markdown 正文
@@ -168,7 +168,7 @@ source: paperbrain
         lines += ["*暂无结构化笔记*", ""]
 
     # 思维导图
-    if paper.mindmap_code:
+    if include_mindmap and paper.mindmap_code:
         processed_mindmap = _process_mermaid_for_obsidian(paper.mindmap_code.strip())
         lines += [
             "## 🗺️ 思维导图",
@@ -188,6 +188,7 @@ def export_paper_to_obsidian(
     tags: list,
     vault_path: str,
     sub_dir: str = "Papers",
+    include_mindmap: bool = True,
 ) -> str:
     """
     将论文导出为 Obsidian Markdown 文件
@@ -215,7 +216,7 @@ def export_paper_to_obsidian(
     filename = sanitize_filename(paper.title) + ".md"
     file_path = target_dir / filename
 
-    md_content = generate_obsidian_md(paper, tags)
+    md_content = generate_obsidian_md(paper, tags, include_mindmap=include_mindmap)
 
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(md_content)
