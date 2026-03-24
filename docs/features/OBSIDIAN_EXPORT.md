@@ -1,7 +1,8 @@
 # Obsidian 导出功能
 
-> **版本**: 1.6.0
+> **版本**: 1.6.1
 > **创建日期**: 2026-03-24
+> **最后更新**: 2026-03-24
 > **状态**: 已完成
 
 ---
@@ -79,8 +80,9 @@ graph TD
 ## 使用方法
 
 1. 打开任意一篇已有结构化笔记的论文详情页
-2. 点击右上角「📤 导出到 Obsidian」按钮
-3. 导出成功后会显示文件的完整路径
+2. 按需勾选「包含思维导图」（默认不勾选）
+3. 点击右上角「📤 导出到 Obsidian」按钮
+4. 导出成功后会显示文件的完整路径
 
 ---
 
@@ -92,6 +94,7 @@ graph TD
 | vault 路径不存在 | 显示错误信息，不崩溃 |
 | 论文无结构化笔记 | 正文中显示"暂无结构化笔记"提示 |
 | 论文无思维导图 | 跳过思维导图章节 |
+| 未勾选「包含思维导图」 | 只导出结构化笔记，不含 Mermaid 代码块 |
 | 文件名含特殊字符（`/ : * ? " < > \|`）| `sanitize_filename()` 替换为 `-` |
 | 同名文件已存在 | 直接覆盖（幂等更新） |
 
@@ -113,8 +116,10 @@ graph TD
 ### `services/obsidian_exporter.py`
 
 - `sanitize_filename(title)` — 清理文件名非法字符，限制长度 200
-- `generate_obsidian_md(paper, tags)` — 生成完整 Markdown 字符串（可独立测试）
-- `export_paper_to_obsidian(paper, tags, vault_path, sub_dir)` — 写入文件，返回绝对路径
+- `generate_obsidian_md(paper, tags, include_mindmap)` — 生成完整 Markdown 字符串（可独立测试）
+- `export_paper_to_obsidian(paper, tags, vault_path, sub_dir, include_mindmap)` — 写入文件，返回绝对路径
+- `_process_mermaid_for_obsidian(code)` — 对 Mermaid 节点文字按视觉宽度自动折行（中文算2/ASCII算1），统一 `\n` → `<br/>`
+- `_wrap_node_text(text)` — 单节点文字折行核心逻辑，优先在空格/中文标点处断开
 
 ### 配置持久化
 
