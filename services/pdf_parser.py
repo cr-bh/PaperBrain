@@ -422,20 +422,26 @@ class PDFParser:
                 # 向下扫描脚注文本（水平线之后的短文本，如 † ‡ 注释）
                 # 脚注通常紧跟表格底线，avg_line_len < 80 排除正文长段落
                 # 连续性检测：若当前块与上一扩展块间隔 > 15pt，停止（已超出脚注区域）
+                # 栏内过滤：只纳入在当前栏 x 范围内的文本块，避免把相邻栏的图表标签纳入
                 try:
                     blocks = page.get_text("blocks")
                     prev_bottom = table_bottom
                     for b in sorted(blocks, key=lambda x: x[1]):
                         if len(b) < 5 or b[6] != 0:
                             continue
-                        by0, by1 = b[1], b[3]
+                        bx0, by0, bx1, by1 = b[0], b[1], b[2], b[3]
                         if by0 <= table_bottom:
                             continue
                         if by0 > table_bottom + 60:
                             break
-                        # 连续性：与上一块间隔 > 15pt 则停止
-                        if by0 - prev_bottom > 15:
+                        # 连续性：与上一块间隔 > 8pt 则停止
+                        # 真正的脚注（† ‡ 注释）紧跟表格底线，间隔通常 < 5pt；
+                        # 图表标签（坐标轴数字等）距表格底线较远，间隔 > 8pt 时停止
+                        if by0 - prev_bottom > 8:
                             break
+                        # 栏内过滤：文本块必须在当前栏 x 范围内（允许 10pt 误差）
+                        if bx0 < col_x0 - 10 or bx1 > col_x1 + 10:
+                            continue
                         text = b[4].strip() if len(b) > 4 else ""
                         lines = [l for l in text.split('\n') if l.strip()]
                         avg_len = len(text) / max(len(lines), 1)
@@ -623,6 +629,9 @@ class PDFParser:
     }
     # 全局最大保留图片数（跨所有页面）
     MAX_TOTAL_IMAGES = 12
+    # 非 table 类型（figure/architecture/performance/algorithm）的最少保留配额
+    # 防止附录大量 Table 把正文核心 Figure 挤出 Top MAX_TOTAL_IMAGES
+    FIGURE_QUOTA = 4
     # 每页最多保留图片数
     MAX_PER_PAGE = 4
 
@@ -772,11 +781,21 @@ class PDFParser:
                 # 跨栏补充检测：caption 判断为单栏，但 drawings/文本 x 范围超出当前栏
                 # 典型场景：caption 右边界恰好在栏间隙内（差几 pt），导致跨栏检测失败，
                 # 但图表内容实际跨越了两栏（如 Figure 4 drawings x=228~413 超出左栏 x1=359）
+                #
+                # 判断标准：crop_rect 在原始栏内的比例 < 80%，才认为真正跨栏。
+                # 避免"坐标轴溢出"误判：折线图/柱状图的坐标轴区域可能稍微超出栏边界
+                # （如 x0 比右栏左边界小 20~30pt），但图形主体仍在原始栏内（比例 > 80%）。
+                # 比例 < 80% 才说明图形真正跨越了两栏（如全页宽图、跨栏大图）。
                 if len(columns) > 1 and not (
                     col_x0 == page.rect.x0 + 20 and col_x1 == page.rect.x1 - 20
                 ):
-                    # crop_rect 的 x 范围是否超出了当前栏（允许 20pt 误差）
-                    if crop_rect.x0 < col_x0 - 20 or crop_rect.x1 > col_x1 + 20:
+                    crop_w = crop_rect.x1 - crop_rect.x0
+                    if crop_w > 0:
+                        overlap = max(0, min(col_x1, crop_rect.x1) - max(col_x0, crop_rect.x0))
+                        in_col_ratio = overlap / crop_w
+                    else:
+                        in_col_ratio = 1.0
+                    if in_col_ratio < 0.80:
                         col_x0 = page.rect.x0 + 20
                         col_x1 = page.rect.x1 - 20
                         crop_rect = self._determine_crop_rect(
@@ -813,9 +832,17 @@ class PDFParser:
             page_candidates.sort(key=lambda c: c["priority"])
             all_candidates.extend(page_candidates[:self.MAX_PER_PAGE])
 
-        # 全局最多保留 MAX_TOTAL_IMAGES 张，优先级高的优先
-        all_candidates.sort(key=lambda c: c["priority"])
-        selected = all_candidates[:self.MAX_TOTAL_IMAGES]
+        # 全局最多保留 MAX_TOTAL_IMAGES 张，两阶段选择：
+        # 1. 先从非 table 类型（figure/architecture/performance/algorithm）中取 FIGURE_QUOTA 张
+        #    按 (priority, page) 排序，确保正文核心图（Figure 1 等）不被附录大量 Table 挤掉
+        # 2. 剩余名额用 table 填充（同样按 (priority, page) 排序，正文 table 优先于附录 table）
+        non_tables = [c for c in all_candidates if c["img_type"] != "table"]
+        tables = [c for c in all_candidates if c["img_type"] == "table"]
+        non_tables.sort(key=lambda c: (c["priority"], c["page"]))
+        tables.sort(key=lambda c: (c["priority"], c["page"]))
+        quota_non_table = min(self.FIGURE_QUOTA, len(non_tables))
+        remaining = self.MAX_TOTAL_IMAGES - quota_non_table
+        selected = non_tables[:quota_non_table] + tables[:remaining]
 
         # 按页码+idx 顺序渲染保存
         selected.sort(key=lambda c: (c["page"], c["hit"]["rect"].y0))
