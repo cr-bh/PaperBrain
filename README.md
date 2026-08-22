@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 # 🧠 PaperFlow
@@ -7,7 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.31-red.svg)](https://streamlit.io)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-1.4.0-brightgreen.svg)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-1.6.0-brightgreen.svg)](docs/CHANGELOG.md)
 
 [English](#english) | [中文](#中文)
 
